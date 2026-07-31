@@ -16,6 +16,19 @@ void OpenGlitchAudioProcessor::prepareToPlay (double sampleRate, int samplesPerB
 {
     heavy.reset (hv_OpenGlitch_new (sampleRate));
 
+    // Heavy only stores parameter defaults as metadata; the wrapper must push
+    // them into the graph or receivers like host_playing stay at zero.
+    const int numParams = hv_getParameterInfo (heavy.get(), 0, nullptr);
+    for (int i = 0; i < numParams; ++i)
+    {
+        HvParameterInfo info;
+        if (hv_getParameterInfo (heavy.get(), i, &info) > 0
+            && info.type == HV_PARAM_TYPE_PARAMETER_IN)
+        {
+            hv_sendFloatToReceiver (heavy.get(), info.hash, info.defaultVal);
+        }
+    }
+
     heavyInput.setSize (2, samplesPerBlock);
     lastSentBypass = -1.0f; // force a resend on the first block
 }

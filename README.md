@@ -11,10 +11,33 @@ Licensed under **GPLv3** (see [LICENSE](LICENSE)).
 
 ## Status
 
-Phase 1 — build skeleton. The plugin compiles as VST3 and Standalone and passes
-stereo audio through the hvcc-generated Heavy context, with a single `bypass`
-parameter (0 = pass audio, 1 = mute with a 10 ms ramp) proving the
-JUCE → Heavy parameter path works.
+Phase 2 — the DSP engine is complete in Pure Data. A 16-step sequencer
+(`glitch_clock`) runs at one 16th note per step from `host_bpm`/`host_playing`
+(free-running at 120 BPM until Phase 3 wires up DAW transport) and broadcasts
+the current step's effect to nine parallel effect patches, gated in with 5 ms
+crossfades. A `seq_chaos` control randomly overrides the programmed grid, and a
+master section adds overdrive, lowpass and wet/dry mix. The default grid ships
+with a demo pattern so the plugin glitches audibly on first load.
+
+Effect indices for the `step_1..16` parameters:
+
+| # | Effect | Character | Controls |
+|---|--------|-----------|----------|
+| 0 | Dry | untouched input | — |
+| 1 | TapeStop | slows to a stop across the step | `fx_tapestop_speed` |
+| 2 | Modulator | ring mod, tremolo → metallic | `fx_mod_freq` |
+| 3 | Retrigger | loops the step's first slice | `fx_retrigger_rate`, `fx_retrigger_pitch` |
+| 4 | Shuffler | swaps in a random earlier step | `fx_shuffle_range` |
+| 5 | Reverser | plays recent audio backwards | — |
+| 6 | Crusher | sample-rate crush + drive | `fx_crush_rate`, `fx_crush_drive` |
+| 7 | Gater | rhythmic chopper | `fx_gate_rate`, `fx_gate_duty` |
+| 8 | Delay | tempo-synced damped echo | `fx_delay_div`, `fx_delay_feedback` |
+| 9 | Stretcher | tape-style half-speed drag | `fx_stretch_speed` |
+
+Master: `master_drive`, `master_lowpass`, `master_mix`, `bypass`, `seq_chaos`.
+The sequencer emits a `playhead` output parameter for the Phase 4 GUI.
+Until Phase 3 lands, only `bypass` is exposed as a DAW parameter; everything
+else runs on its default.
 
 ## Building
 
