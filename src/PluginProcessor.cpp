@@ -1,7 +1,10 @@
 #include "PluginProcessor.h"
 
 #include <cmath>
+#include <cstdint>
 #include <limits>
+
+#include "PluginEditor.h"
 
 namespace
 {
@@ -20,7 +23,23 @@ std::unique_ptr<juce::AudioParameterFloat> makeFloat (const char* id, const char
         range.setSkewForCentre (skewCentre);
     return std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID (id, 1), name, range, def,
-        juce::AudioParameterFloatAttributes().withLabel (label));
+        juce::AudioParameterFloatAttributes().withLabel (label).withStringFromValueFunction (
+            [] (float v, int) { return juce::String (v, 2); }));
+}
+
+std::unique_ptr<juce::AudioParameterFloat> makeHz (const char* id, const char* name,
+                                                   float min, float max, float def, float skewCentre)
+{
+    juce::NormalisableRange<float> range (min, max);
+    range.setSkewForCentre (skewCentre);
+    return std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID (id, 1), name, range, def,
+        juce::AudioParameterFloatAttributes().withLabel ("Hz").withStringFromValueFunction (
+            [] (float v, int)
+            {
+                return v >= 1000.0f ? juce::String (v / 1000.0f, 1) + "k"
+                                    : juce::String (v, 0);
+            }));
 }
 
 std::unique_ptr<juce::AudioParameterInt> makeInt (const char* id, const char* name,
@@ -53,11 +72,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout OpenGlitchAudioProcessor::cr
 
     auto effects = std::make_unique<juce::AudioProcessorParameterGroup> ("effects", "Effects", "|");
     effects->addChild (makeFloat ("fx_tapestop_speed", "Tape Stop Speed", 0.1f, 4.0f, 1.0f, 1.0f, "x step"));
-    effects->addChild (makeFloat ("fx_mod_freq", "Mod Frequency", 1.0f, 4000.0f, 150.0f, 200.0f, "Hz"));
+    effects->addChild (makeHz ("fx_mod_freq", "Mod Frequency", 1.0f, 4000.0f, 150.0f, 200.0f));
     effects->addChild (makeInt ("fx_retrigger_rate", "Retrigger Slices", 1, 8, 4, "per step"));
     effects->addChild (makeFloat ("fx_retrigger_pitch", "Retrigger Pitch", 0.25f, 2.0f, 1.0f, 1.0f, "x"));
     effects->addChild (makeInt ("fx_shuffle_range", "Shuffle Range", 1, 8, 4, "steps"));
-    effects->addChild (makeFloat ("fx_crush_rate", "Crush Rate", 200.0f, 20000.0f, 2500.0f, 2500.0f, "Hz"));
+    effects->addChild (makeHz ("fx_crush_rate", "Crush Rate", 200.0f, 20000.0f, 2500.0f, 2500.0f));
     effects->addChild (makeFloat ("fx_crush_drive", "Crush Drive", 1.0f, 10.0f, 2.0f, 0.0f, "x"));
     effects->addChild (makeInt ("fx_gate_rate", "Gate Rate", 1, 16, 4, "per step"));
     effects->addChild (std::make_unique<juce::AudioParameterFloat> (
@@ -72,7 +91,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout OpenGlitchAudioProcessor::cr
 
     auto master = std::make_unique<juce::AudioProcessorParameterGroup> ("master", "Master", "|");
     master->addChild (makeFloat ("master_drive", "Drive", 1.0f, 10.0f, 1.0f, 0.0f, "x"));
-    master->addChild (makeFloat ("master_lowpass", "Lowpass", 100.0f, 20000.0f, 20000.0f, 2000.0f, "Hz"));
+    master->addChild (makeHz ("master_lowpass", "Lowpass", 100.0f, 20000.0f, 20000.0f, 2000.0f));
     master->addChild (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID ("master_mix", 1), "Mix",
         juce::NormalisableRange<float> (0.0f, 1.0f), 1.0f, percentAttributes()));
@@ -112,7 +131,10 @@ OpenGlitchAudioProcessor::OpenGlitchAudioProcessor()
 
 void OpenGlitchAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
-    heavy.reset (hv_OpenGlitch_new (sampleRate));
+    // The default 2KB input queue overflows on the first block (defaults +
+    // full APVTS push + transport all land before the first process call),
+    // silently dropping the later messages. 32KB gives ample headroom.
+    heavy.reset (hv_OpenGlitch_new_with_options (sampleRate, 10, 32, 2));
     hv_setUserData (heavy.get(), this);
     hv_setSendHook (heavy.get(), heavySendHook);
 
@@ -142,7 +164,21 @@ void OpenGlitchAudioProcessor::prepareToPlay (double sampleRate, int samplesPerB
     lastFiredTick = std::numeric_limits<long long>::min();
     playheadStep.store (-1, std::memory_order_relaxed);
 
-    heavyInput.setSize (2, samplesPerBlock);
+    ensureScratch (samplesPerBlock);
+}
+
+void OpenGlitchAudioProcessor::ensureScratch (int numSamples)
+{
+    if (numSamples <= scratchCapacity)
+        return;
+
+    const int channelLength = (numSamples + 7) & ~7; // keep each channel a SIMD multiple
+    scratchAllocation.malloc ((size_t) channelLength * 4 + 8);
+    auto* base = reinterpret_cast<float*> (
+        (reinterpret_cast<std::uintptr_t> (scratchAllocation.get()) + 31u) & ~std::uintptr_t (31));
+    for (int i = 0; i < 4; ++i)
+        scratch[i] = base + (size_t) i * (size_t) channelLength;
+    scratchCapacity = numSamples;
 }
 
 void OpenGlitchAudioProcessor::releaseResources()
@@ -172,8 +208,10 @@ void OpenGlitchAudioProcessor::pushChangedParameters()
         const float v = link.value->load (std::memory_order_relaxed);
         if (! juce::exactlyEqual (v, link.lastSent)) // NaN sentinel compares unequal, forcing the first send
         {
-            hv_sendFloatToReceiver (heavy.get(), link.hash, v);
-            link.lastSent = v;
+            // Only mark as sent if the queue accepted it, so a full queue
+            // means a retry next block instead of a silently stale receiver.
+            if (hv_sendFloatToReceiver (heavy.get(), link.hash, v))
+                link.lastSent = v;
         }
     }
 }
@@ -210,16 +248,19 @@ void OpenGlitchAudioProcessor::pushTransport (int numSamples)
     const int wantHostSync = hosted ? 1 : 0;
     if (wantHostSync != hostSyncActive)
     {
-        hv_sendFloatToReceiver (heavy.get(), HV_OPENGLITCH_PARAM_IN_HOST_PLAYING,
-                                hosted ? 0.0f : 1.0f);
-        hostSyncActive = wantHostSync;
+        // Only latch on success: a full queue means a retry next block.
+        if (hv_sendFloatToReceiver (heavy.get(), HV_OPENGLITCH_PARAM_IN_HOST_PLAYING,
+                                    hosted ? 0.0f : 1.0f))
+            hostSyncActive = wantHostSync;
     }
+
+    displayBpm.store ((float) bpm, std::memory_order_relaxed);
 
     // Effects derive slice lengths and ramp times from host_bpm.
     if (std::abs (bpm - lastSentBpm) > 0.001)
     {
-        hv_sendFloatToReceiver (heavy.get(), HV_OPENGLITCH_PARAM_IN_HOST_BPM, (float) bpm);
-        lastSentBpm = bpm;
+        if (hv_sendFloatToReceiver (heavy.get(), HV_OPENGLITCH_PARAM_IN_HOST_BPM, (float) bpm))
+            lastSentBpm = bpm;
     }
 
     if (! hosted)
@@ -277,21 +318,23 @@ void OpenGlitchAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     if (processable == 0)
         return;
 
-    if (heavyInput.getNumSamples() < numSamples)
-        heavyInput.setSize (2, numSamples, false, false, true);
+    ensureScratch (numSamples);
 
     for (int ch = 0; ch < 2; ++ch)
-        heavyInput.copyFrom (ch, 0, buffer, ch, 0, numSamples);
+        juce::FloatVectorOperations::copy (scratch[ch], buffer.getReadPointer (ch), numSamples);
 
-    float* inputs[2]  = { heavyInput.getWritePointer (0), heavyInput.getWritePointer (1) };
-    float* outputs[2] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
+    float* inputs[2]  = { scratch[0], scratch[1] };
+    float* outputs[2] = { scratch[2], scratch[3] };
 
     hv_process (heavy.get(), inputs, outputs, processable);
+
+    for (int ch = 0; ch < 2; ++ch)
+        juce::FloatVectorOperations::copy (buffer.getWritePointer (ch), scratch[2 + ch], processable);
 }
 
 juce::AudioProcessorEditor* OpenGlitchAudioProcessor::createEditor()
 {
-    return new juce::GenericAudioProcessorEditor (*this);
+    return new OpenGlitchAudioProcessorEditor (*this);
 }
 
 bool OpenGlitchAudioProcessor::hasEditor() const              { return true; }

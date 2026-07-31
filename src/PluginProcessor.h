@@ -42,6 +42,7 @@ public:
     // position last reported by the Heavy context (-1 before playback).
     juce::AudioProcessorValueTreeState apvts;
     int getCurrentStep() const noexcept { return playheadStep.load (std::memory_order_relaxed); }
+    float getDisplayBpm() const noexcept { return displayBpm.load (std::memory_order_relaxed); }
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
@@ -75,9 +76,13 @@ private:
 
     juce::AudioParameterBool* bypassParam = nullptr;
 
-    // Pre-allocated copy of the host input so Heavy never reads from the
-    // buffer it is writing into.
-    juce::AudioBuffer<float> heavyInput;
+    // Heavy's SIMD loads/stores require 16/32-byte aligned channel buffers.
+    // Host buffers (and juce::AudioBuffer channels) don't guarantee that, so
+    // audio is bounced through this explicitly aligned scratch block.
+    void ensureScratch (int numSamples);
+    juce::HeapBlock<float> scratchAllocation;
+    float* scratch[4] = {}; // inL, inR, outL, outR
+    int scratchCapacity = 0;
 
     // Transport state. hostSyncActive: -1 unknown, 0 standalone metro, 1 DAW-driven.
     int hostSyncActive = -1;
@@ -86,6 +91,7 @@ private:
     long long lastFiredTick = std::numeric_limits<long long>::min();
 
     std::atomic<int> playheadStep { -1 };
+    std::atomic<float> displayBpm { 120.0f };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (OpenGlitchAudioProcessor)
 };

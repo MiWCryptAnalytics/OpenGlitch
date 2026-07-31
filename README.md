@@ -1,5 +1,7 @@
 # OpenGlitch
 
+![OpenGlitch UI](docs/screenshot.png)
+
 An open-source recreation of **dblue Glitch 1.3** (original concept by Kieran Foster),
 built from:
 
@@ -10,6 +12,16 @@ built from:
 Licensed under **GPLv3** (see [LICENSE](LICENSE)).
 
 ## Status
+
+Phase 4 — full custom GUI. The editor recreates the Glitch matrix: 9 effect
+rows x 16 step columns. Click a cell to assign the effect, click again to
+clear, drag to paint, right-click to erase a column. The playhead lamp and
+column wash follow the DAW-locked sequencer, an LCD shows step and tempo,
+the bottom panel swaps to the knobs of the last-touched effect, and the
+right-hand strip carries Chaos / Drive / Filter / Mix plus Bypass. Everything
+binds through APVTS attachments; a headless screenshot tool
+(`-DOPENGLITCH_BUILD_TOOLS=ON`, target `OpenGlitchScreenshot`) renders the
+editor to PNG without a display for docs and CI.
 
 Phase 2 — the DSP engine is complete in Pure Data. A 16-step sequencer
 (`glitch_clock`) runs at one 16th note per step from `host_bpm`/`host_playing`

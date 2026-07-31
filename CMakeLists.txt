@@ -122,7 +122,8 @@ juce_add_plugin(OpenGlitch
     COPY_PLUGIN_AFTER_BUILD FALSE)
 
 target_sources(OpenGlitch PRIVATE
-    src/PluginProcessor.cpp)
+    src/PluginProcessor.cpp
+    src/PluginEditor.cpp)
 
 target_compile_definitions(OpenGlitch PUBLIC
     JUCE_WEB_BROWSER=0
@@ -137,3 +138,24 @@ target_link_libraries(OpenGlitch
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)
+
+# ---------------------------------------------------------------------------
+# Developer tools: headless UI screenshot renderer (also usable from CI)
+# ---------------------------------------------------------------------------
+option(OPENGLITCH_BUILD_TOOLS "Build developer tools (UI screenshot renderer)" OFF)
+if(OPENGLITCH_BUILD_TOOLS)
+    juce_add_console_app(OpenGlitchScreenshot PRODUCT_NAME "OpenGlitchScreenshot")
+    target_sources(OpenGlitchScreenshot PRIVATE
+        tools/Screenshot.cpp
+        src/PluginProcessor.cpp
+        src/PluginEditor.cpp)
+    target_include_directories(OpenGlitchScreenshot PRIVATE src)
+    target_compile_definitions(OpenGlitchScreenshot PRIVATE
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0)
+    target_link_libraries(OpenGlitchScreenshot PRIVATE
+        OpenGlitchDSP
+        juce::juce_audio_utils
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)
+endif()
