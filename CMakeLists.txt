@@ -119,7 +119,9 @@ juce_add_plugin(OpenGlitch
     NEEDS_MIDI_INPUT FALSE
     NEEDS_MIDI_OUTPUT FALSE
     IS_MIDI_EFFECT FALSE
-    COPY_PLUGIN_AFTER_BUILD FALSE)
+    # Auto-installs to the platform plugin folder (~/.vst3 on Linux) so a
+    # rebuild is immediately visible to hosts.
+    COPY_PLUGIN_AFTER_BUILD TRUE)
 
 target_sources(OpenGlitch PRIVATE
     src/PluginProcessor.cpp
