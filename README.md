@@ -36,8 +36,19 @@ Effect indices for the `step_1..16` parameters:
 
 Master: `master_drive`, `master_lowpass`, `master_mix`, `bypass`, `seq_chaos`.
 The sequencer emits a `playhead` output parameter for the Phase 4 GUI.
-Until Phase 3 lands, only `bypass` is exposed as a DAW parameter; everything
-else runs on its default.
+
+As of Phase 3, all 34 parameters are exposed to the DAW through a JUCE
+`AudioProcessorValueTreeState` (grouped Sequencer / Effects / Master, step
+slots as named choices, proper units and log skews, `bypass` reported as the
+host bypass parameter), and plugin state saves/restores with the session.
+
+**Transport sync:** when a DAW timeline is present, JUCE *is* the clock — the
+Pd metro is switched off and every 16th note is derived from `ppqPosition`
+and scheduled sample-accurately into the Heavy context (`host_tick`), so the
+grid locks to the DAW bar and follows loops, relocates and tempo changes.
+Step 1 is always the start of a bar. On transport stop the engine falls back
+to clean dry. Without a timeline (standalone) the Phase 2 free-running
+120 BPM metro takes over.
 
 ## Building
 

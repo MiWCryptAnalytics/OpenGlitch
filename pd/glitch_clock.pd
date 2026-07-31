@@ -67,6 +67,11 @@
 #X obj 850 60 t b b;
 #X msg 920 60 120;
 #X msg 850 90 0;
+#X obj 700 450 r host_tick;
+#X obj 700 480 moses 0;
+#X msg 640 520 0;
+#X obj 760 520 t b f;
+#X text 620 560 host_tick: DAW-driven clock. JUCE schedules the 16th-note index sample-accurately when hosted (metro stays off) \; -1 on transport stop falls back to dry. Free-running metro is only for standalone use.;
 #X connect 2 0 3 0;
 #X connect 3 0 4 0;
 #X connect 3 1 5 1;
@@ -153,3 +158,9 @@
 #X connect 66 0 3 0;
 #X connect 65 0 67 0;
 #X connect 67 0 11 0;
+#X connect 68 0 69 0;
+#X connect 69 0 70 0;
+#X connect 70 0 11 0;
+#X connect 69 1 71 0;
+#X connect 71 1 16 1;
+#X connect 71 0 15 0;
