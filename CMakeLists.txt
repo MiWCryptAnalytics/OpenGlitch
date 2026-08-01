@@ -107,6 +107,12 @@ if((CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|i.86") AND NOT MSVC)
     target_compile_options(OpenGlitchDSP PUBLIC -msse4.1)
 endif()
 
+# HvUtils.h includes windows.h, whose min/max macros break std::numeric_limits
+# in every TU that sees the Heavy headers.
+if(WIN32)
+    target_compile_definitions(OpenGlitchDSP PUBLIC NOMINMAX)
+endif()
+
 # ---------------------------------------------------------------------------
 # Embedded assets: the UI fonts (OFL-licensed, licenses alongside the files)
 # ---------------------------------------------------------------------------
