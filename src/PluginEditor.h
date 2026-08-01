@@ -57,6 +57,7 @@ public:
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
+    void mouseMove (const juce::MouseEvent&) override;
 
     // Gesture logic, exposed for tests: press paints (or arms a clear if the
     // cell already holds this effect), dragging rightwards along the row ties
@@ -85,6 +86,11 @@ private:
     float columnFlash[16] = {}; // per-column trigger flare, decays each tick
     bool pendingClearOnUp = false; // click-in-place toggles; dragging cancels it
     int lastPaintCol = -1, lastPaintRow = -1; // for drag-to-span gestures
+
+    // Grid tips hold off until the hand has settled, so they don't pop up
+    // mid-pattern-drawing; every mouse event restarts the quiet period.
+    static constexpr juce::uint32 tipHoldOffMs = 900;
+    juce::uint32 lastMouseActivityMs = 0;
 };
 
 // Strip below the matrix: pattern banks 1..16 (click to switch, shift-click to

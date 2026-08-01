@@ -268,6 +268,9 @@ void StepMatrix::clearAll()
 
 juce::String StepMatrix::getTooltip()
 {
+    if (juce::Time::getMillisecondCounter() - lastMouseActivityMs < tipHoldOffMs)
+        return {};
+
     const auto pos = getMouseXYRelative().toFloat();
     const int row = (int) std::floor ((pos.y - lampHeight) / rowHeight());
     if (row < 0 || row > 8)
@@ -335,6 +338,7 @@ void StepMatrix::handleErase (int col)
 
 void StepMatrix::mouseDown (const juce::MouseEvent& e)
 {
+    lastMouseActivityMs = juce::Time::getMillisecondCounter();
     const auto pos = e.position;
     int col = 0, row = 0;
 
@@ -359,6 +363,7 @@ void StepMatrix::mouseDown (const juce::MouseEvent& e)
 
 void StepMatrix::mouseDrag (const juce::MouseEvent& e)
 {
+    lastMouseActivityMs = juce::Time::getMillisecondCounter();
     int col = 0, row = 0;
     if (! locateCell (e.position, col, row))
         return;
@@ -370,8 +375,14 @@ void StepMatrix::mouseDrag (const juce::MouseEvent& e)
 
 void StepMatrix::mouseUp (const juce::MouseEvent& e)
 {
+    lastMouseActivityMs = juce::Time::getMillisecondCounter();
     if (! e.mods.isPopupMenu())
         handleRelease();
+}
+
+void StepMatrix::mouseMove (const juce::MouseEvent&)
+{
+    lastMouseActivityMs = juce::Time::getMillisecondCounter();
 }
 
 void StepMatrix::paint (juce::Graphics& g)
