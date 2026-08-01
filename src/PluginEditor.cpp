@@ -83,38 +83,35 @@ void OpenGlitchLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, i
                                               float rotaryEndAngle, juce::Slider& slider)
 {
     using namespace glitch::palette;
-    auto bounds = juce::Rectangle<int> (x, y, width, height).toFloat().reduced (6.0f);
+    auto bounds = juce::Rectangle<int> (x, y, width, height).toFloat().reduced (4.0f);
     const float radius = juce::jmin (bounds.getWidth(), bounds.getHeight()) * 0.5f;
     const auto centre = bounds.getCentre();
     const float angle = rotaryStartAngle + sliderPos * (rotaryEndAngle - rotaryStartAngle);
     const auto fill = slider.findColour (juce::Slider::rotarySliderFillColourId);
 
-    const float bodyR = radius * 0.72f;
-    g.setColour (juce::Colour (0xff2a2f37));
-    g.fillEllipse (centre.x - bodyR, centre.y - bodyR, bodyR * 2.0f, bodyR * 2.0f);
-    g.setColour (cellStroke);
-    g.drawEllipse (centre.x - bodyR, centre.y - bodyR, bodyR * 2.0f, bodyR * 2.0f, 1.5f);
+    // Original-Glitch-style knob: a near-black disc with a thick flat donut
+    // wedge painted on the face from min to the current value. No needle.
+    const juce::Rectangle<float> face (centre.x - radius, centre.y - radius,
+                                       radius * 2.0f, radius * 2.0f);
+    juce::ColourGradient sheen (juce::Colour (0xff1e2126), centre.x, face.getY(),
+                                juce::Colour (0xff121418), centre.x, face.getBottom(), false);
+    g.setGradientFill (sheen);
+    g.fillEllipse (face);
+    g.setColour (juce::Colour (0xff090a0c));
+    g.drawEllipse (face, 1.6f);
 
-    const float arcR = radius * 0.92f;
+    const auto donut = face.reduced (radius * 0.20f);
+    constexpr float hole = 0.45f; // inner-circle proportion of the wedge
+
     juce::Path track;
-    track.addCentredArc (centre.x, centre.y, arcR, arcR, 0.0f, rotaryStartAngle, rotaryEndAngle, true);
-    g.setColour (juce::Colour (0xff30353e));
-    g.strokePath (track, juce::PathStrokeType (3.0f, juce::PathStrokeType::curved,
-                                               juce::PathStrokeType::rounded));
+    track.addPieSegment (donut, rotaryStartAngle, rotaryEndAngle, hole);
+    g.setColour (juce::Colour (0xff363c46));
+    g.fillPath (track);
 
     juce::Path value;
-    value.addCentredArc (centre.x, centre.y, arcR, arcR, 0.0f, rotaryStartAngle, angle, true);
-    g.setColour (fill.withAlpha (0.25f));
-    g.strokePath (value, juce::PathStrokeType (6.5f, juce::PathStrokeType::curved,
-                                               juce::PathStrokeType::rounded));
+    value.addPieSegment (donut, rotaryStartAngle, angle, hole);
     g.setColour (fill);
-    g.strokePath (value, juce::PathStrokeType (3.0f, juce::PathStrokeType::curved,
-                                               juce::PathStrokeType::rounded));
-
-    const auto tip = centre.getPointOnCircumference (bodyR * 0.85f, angle);
-    const auto tail = centre.getPointOnCircumference (bodyR * 0.35f, angle);
-    g.setColour (fill.brighter (0.4f));
-    g.drawLine ({ tail, tip }, 2.4f);
+    g.fillPath (value);
 }
 
 void OpenGlitchLookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, int width, int height,
@@ -777,7 +774,7 @@ void EffectPanel::setEffect (int effectIndex)
 
 void EffectPanel::resized()
 {
-    title.setBounds (14, 8, 220, 24);
+    title.setBounds (56, 8, 220, 24);
     blurb.setFont (juce::Font (juce::FontOptions (12.0f)));
     blurb.setBounds (14, 30, getWidth() - 28, 30);
 
@@ -815,10 +812,27 @@ void EffectPanel::paint (juce::Graphics& g)
     g.fillRoundedRectangle (bounds, 6.0f);
     g.setColour (juce::Colours::white.withAlpha (0.05f));
     g.fillRect (6.0f, 1.0f, bounds.getWidth() - 12.0f, 1.0f);
-    g.setColour (glitch::effectColour (currentEffect).withAlpha (0.9f));
+    const auto colour = glitch::effectColour (currentEffect);
+    g.setColour (colour.withAlpha (0.9f));
     g.fillRoundedRectangle (0.0f, 0.0f, 4.0f, bounds.getHeight(), 2.0f);
     g.setColour (cellStroke);
     g.drawRoundedRectangle (bounds.reduced (0.5f), 6.0f, 1.0f);
+
+    // The original's numbered flag tab, pointing at the effect name.
+    juce::Path tab;
+    tab.startNewSubPath (12.0f, 8.0f);
+    tab.lineTo (38.0f, 8.0f);
+    tab.lineTo (47.0f, 20.0f);
+    tab.lineTo (38.0f, 32.0f);
+    tab.lineTo (12.0f, 32.0f);
+    tab.closeSubPath();
+    g.setColour (colour);
+    g.fillPath (tab);
+    g.setFont (juce::Font (juce::FontOptions (16.0f)).boldened());
+    g.setColour (juce::Colours::black.withAlpha (0.55f));
+    g.drawText (juce::String (currentEffect), 13, 9, 26, 24, juce::Justification::centred);
+    g.setColour (juce::Colours::white);
+    g.drawText (juce::String (currentEffect), 12, 8, 26, 24, juce::Justification::centred);
 }
 
 // ---------------------------------------------------------------------------
