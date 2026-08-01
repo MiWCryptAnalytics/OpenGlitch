@@ -183,13 +183,17 @@ if(OPENGLITCH_BUILD_TESTS)
         tests/DspEngineTests.cpp
         tests/LfoEngineTests.cpp
         tests/HostSimTests.cpp
+        tests/WrapperTests.cpp
         src/PluginProcessor.cpp
         src/PluginEditor.cpp)
     target_include_directories(OpenGlitchTests PRIVATE src tests)
     target_compile_definitions(OpenGlitchTests PRIVATE
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
+        JUCE_PLUGINHOST_VST3=1 # wrapper tests host the built .vst3 like a DAW
+        OPENGLITCH_VST3_DIR="${CMAKE_BINARY_DIR}/OpenGlitch_artefacts/${CMAKE_BUILD_TYPE}/VST3/OpenGlitch.vst3"
         JUCE_MODAL_LOOPS_PERMITTED=1) # tests pump the message loop to flush async updates
+    add_dependencies(OpenGlitchTests OpenGlitch_VST3)
     target_link_libraries(OpenGlitchTests PRIVATE
         OpenGlitchDSP
         Catch2::Catch2WithMain

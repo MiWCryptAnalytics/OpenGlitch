@@ -808,6 +808,22 @@ void OpenGlitchAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         juce::FloatVectorOperations::add (out, scratch[3], processable);
         juce::FloatVectorOperations::multiply (out, 0.5f, processable);
     }
+
+    // Diagnostic wet meter: how strongly the engine altered channel 0.
+    {
+        double diff = 0.0, ref = 0.0;
+        const auto* in = scratch[0];
+        const auto* out = buffer.getReadPointer (0);
+        for (int i = 0; i < processable; ++i)
+        {
+            const double d = (double) out[i] - in[i];
+            diff += d * d;
+            ref += (double) in[i] * in[i];
+        }
+        const float instant = ref > 1e-9 ? (float) std::sqrt (diff / ref) : 0.0f;
+        const float smoothed = 0.9f * diagWet.load (std::memory_order_relaxed) + 0.1f * instant;
+        diagWet.store (smoothed, std::memory_order_relaxed);
+    }
 }
 
 juce::AudioProcessorEditor* OpenGlitchAudioProcessor::createEditor()

@@ -52,6 +52,8 @@ public:
     enum TransportMode { transportUnknown = -1, standaloneClock = 0, hostedStopped = 1, hostedPlaying = 2 };
     int getTransportMode() const noexcept { return diagTransport.load (std::memory_order_relaxed); }
     juce::uint32 getTickCount() const noexcept { return diagTickCount.load (std::memory_order_relaxed); }
+    // 0..1+: how much the engine is changing the audio (rms of out-in vs in).
+    float getWetActivity() const noexcept { return diagWet.load (std::memory_order_relaxed); }
 
     // Pattern system: 8 slots (A..H) stored in the APVTS state tree. The step
     // and length parameters always hold the *active* pattern; edits are
@@ -152,6 +154,7 @@ private:
     std::atomic<float> displayBpm { 120.0f };
     std::atomic<int> diagTransport { transportUnknown };
     std::atomic<juce::uint32> diagTickCount { 0 };
+    std::atomic<float> diagWet { 0.0f };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (OpenGlitchAudioProcessor)
 };

@@ -878,7 +878,9 @@ void OpenGlitchAudioProcessorEditor::timerCallback()
     static const char* const modes[] = { "no audio yet", "standalone clock",
                                          "host timeline: stopped", "host timeline: PLAYING" };
     statusLabel.setText (juce::String (modes[processorRef.getTransportMode() + 1])
-                             + " | ticks " + juce::String (processorRef.getTickCount()),
+                             + " | ticks " + juce::String (processorRef.getTickCount())
+                             + " | fx " + juce::String ((int) std::round (
+                                   processorRef.getWetActivity() * 100.0f)) + "%",
                          juce::dontSendNotification);
 }
 
