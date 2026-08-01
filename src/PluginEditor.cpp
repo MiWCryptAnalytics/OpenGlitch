@@ -1,5 +1,7 @@
 #include "PluginEditor.h"
 
+#include "BinaryData.h"
+
 // Normally injected by CMake from the project version; the fallback keeps
 // ad-hoc builds (IDEs, single-file syntax checks) compiling.
 #ifndef OPENGLITCH_VERSION
@@ -8,6 +10,22 @@
 
 namespace glitch
 {
+static juce::Typeface::Ptr uiTypeface (bool bold)
+{
+    static const auto regular = juce::Typeface::createSystemTypefaceFor (
+        BinaryData::SpaceMonoRegular_ttf, BinaryData::SpaceMonoRegular_ttfSize);
+    static const auto heavy = juce::Typeface::createSystemTypefaceFor (
+        BinaryData::SpaceMonoBold_ttf, BinaryData::SpaceMonoBold_ttfSize);
+    return bold ? heavy : regular;
+}
+
+juce::Font logoFont (float height)
+{
+    static const auto tf = juce::Typeface::createSystemTypefaceFor (
+        BinaryData::RubikGlitchRegular_ttf, BinaryData::RubikGlitchRegular_ttfSize);
+    return juce::Font (juce::FontOptions (tf).withHeight (height));
+}
+
 juce::Colour effectColour (int effectIndex)
 {
     switch (effectIndex)
@@ -53,6 +71,11 @@ static const char* effectBlurb (int effectIndex)
 // ---------------------------------------------------------------------------
 // Look and feel
 // ---------------------------------------------------------------------------
+juce::Typeface::Ptr OpenGlitchLookAndFeel::getTypefaceForFont (const juce::Font& font)
+{
+    return glitch::uiTypeface (font.isBold());
+}
+
 OpenGlitchLookAndFeel::OpenGlitchLookAndFeel()
 {
     using namespace glitch::palette;
@@ -1322,7 +1345,7 @@ void AboutOverlay::paint (juce::Graphics& g)
     const int w = (int) card.getWidth() - 64;
     int y = (int) card.getY() + 24;
 
-    const auto titleFont = juce::Font (juce::FontOptions (26.0f)).boldened();
+    const auto titleFont = glitch::logoFont (28.0f);
     juce::GlyphArrangement measure;
     measure.addLineOfText (titleFont, "OPEN", 0.0f, 0.0f);
     const int openW = (int) std::ceil (measure.getBoundingBox (0, -1, true).getWidth());
@@ -1361,8 +1384,9 @@ void AboutOverlay::paint (juce::Graphics& g)
     caption ("CREDITS");
     para ("Original concept and design: Kieran Foster (illformed)\n"
           "DSP graph: Pure Data, compiled by hvcc (the Wasted Audio fork)\n"
-          "Plugin wrapper and GUI: JUCE 8",
-          3, 12.0f, textDim);
+          "Plugin wrapper and GUI: JUCE 8\n"
+          "Fonts: Rubik Glitch, Space Mono (Google Fonts, OFL)",
+          4, 12.0f, textDim);
 
     caption ("LICENSE");
     para ("GNU General Public License v3. Free software with ABSOLUTELY NO WARRANTY;\n"
@@ -1601,7 +1625,7 @@ void EditorContent::paint (juce::Graphics& g)
     g.setGradientFill (chassis);
     g.fillAll();
 
-    const auto titleFont = juce::Font (juce::FontOptions (27.0f)).boldened();
+    const auto titleFont = glitch::logoFont (30.0f);
     juce::GlyphArrangement measure;
     measure.addLineOfText (titleFont, "OPEN", 0.0f, 0.0f);
     const int openWidth = (int) std::ceil (measure.getBoundingBox (0, -1, true).getWidth());
@@ -1715,6 +1739,10 @@ OpenGlitchAudioProcessorEditor::OpenGlitchAudioProcessorEditor (OpenGlitchAudioP
       content (p)
 {
     setLookAndFeel (&lookAndFeel);
+    // Font resolution goes through the process-wide default LookAndFeel, not
+    // the component-local one, so the embedded Space Mono only takes effect
+    // as the default. Scoped to this plugin's own JUCE instance.
+    juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
 
     // Read the remembered scale before the resize machinery runs: installing
     // the limits clamps the still-0x0 bounds, which fires resized() and would
@@ -1739,6 +1767,8 @@ OpenGlitchAudioProcessorEditor::OpenGlitchAudioProcessorEditor (OpenGlitchAudioP
 
 OpenGlitchAudioProcessorEditor::~OpenGlitchAudioProcessorEditor()
 {
+    if (&juce::LookAndFeel::getDefaultLookAndFeel() == &lookAndFeel)
+        juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
     setLookAndFeel (nullptr);
 }
 

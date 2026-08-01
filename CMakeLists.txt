@@ -105,6 +105,15 @@ if((CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|i.86") AND NOT MSVC)
 endif()
 
 # ---------------------------------------------------------------------------
+# Embedded assets: the UI fonts (OFL-licensed, licenses alongside the files)
+# ---------------------------------------------------------------------------
+juce_add_binary_data(OpenGlitchAssets
+    SOURCES
+        assets/fonts/RubikGlitch-Regular.ttf
+        assets/fonts/SpaceMono-Regular.ttf
+        assets/fonts/SpaceMono-Bold.ttf)
+
+# ---------------------------------------------------------------------------
 # The plugin itself
 # ---------------------------------------------------------------------------
 juce_add_plugin(OpenGlitch
@@ -138,6 +147,7 @@ target_compile_definitions(OpenGlitch PUBLIC
 target_link_libraries(OpenGlitch
     PRIVATE
         OpenGlitchDSP
+        OpenGlitchAssets
         juce::juce_audio_utils
     PUBLIC
         juce::juce_recommended_config_flags
@@ -188,6 +198,7 @@ if(OPENGLITCH_BUILD_TOOLS)
         OPENGLITCH_VERSION="${PROJECT_VERSION}")
     target_link_libraries(OpenGlitchScreenshot PRIVATE
         OpenGlitchDSP
+        OpenGlitchAssets
         juce::juce_audio_utils
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)
@@ -240,6 +251,7 @@ if(OPENGLITCH_BUILD_TESTS)
     add_dependencies(OpenGlitchTests OpenGlitch_VST3)
     target_link_libraries(OpenGlitchTests PRIVATE
         OpenGlitchDSP
+        OpenGlitchAssets
         Catch2::Catch2WithMain
         juce::juce_audio_utils
         juce::juce_recommended_config_flags

@@ -22,12 +22,15 @@ namespace palette
 
 juce::Colour effectColour (int effectIndex); // 0 = dry, 1..9 = effects
 const char* effectName (int effectIndex);
+juce::Font logoFont (float height); // Rubik Glitch, embedded
 } // namespace glitch
 
 class OpenGlitchLookAndFeel : public juce::LookAndFeel_V4
 {
 public:
     OpenGlitchLookAndFeel();
+
+    juce::Typeface::Ptr getTypefaceForFont (const juce::Font&) override; // Space Mono everywhere
 
     void drawRotarySlider (juce::Graphics&, int x, int y, int width, int height,
                            float sliderPosProportional, float rotaryStartAngle,
