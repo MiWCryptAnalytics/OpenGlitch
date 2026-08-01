@@ -12,6 +12,7 @@ int main (int argc, char** argv)
 
     // Run some audio through the free-running sequencer so the snapshot
     // shows the playhead, lamp and LCD in their live state.
+    processor.setPlayConfigDetails (2, 2, 48000.0, 512);
     processor.prepareToPlay (48000.0, 512);
     juce::AudioBuffer<float> audio (2, 512);
     juce::MidiBuffer midi;

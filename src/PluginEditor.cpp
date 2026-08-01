@@ -421,13 +421,13 @@ SequencerBar::SequencerBar (OpenGlitchAudioProcessor& proc)
 
 juce::Rectangle<float> SequencerBar::slotBounds (int slot) const
 {
-    return { 72.0f + (float) slot * 30.0f, 3.0f, 26.0f, (float) getHeight() - 6.0f };
+    return { 58.0f + (float) slot * 19.5f, 3.0f, 17.5f, (float) getHeight() - 6.0f };
 }
 
 void SequencerBar::resized()
 {
-    lengthSlider.setBounds (372, 0, 160, getHeight());
-    swingSlider.setBounds (584, 0, juce::jmax (100, getWidth() - 584), getHeight());
+    lengthSlider.setBounds (428, 0, 150, getHeight());
+    swingSlider.setBounds (622, 0, juce::jmax (100, getWidth() - 622), getHeight());
 }
 
 void SequencerBar::mouseDown (const juce::MouseEvent& e)
@@ -450,10 +450,10 @@ void SequencerBar::paint (juce::Graphics& g)
     using namespace glitch::palette;
 
     g.setColour (textDim);
-    g.setFont (juce::Font (juce::FontOptions (11.5f)).boldened());
-    g.drawText ("PATTERN", 0, 0, 66, getHeight(), juce::Justification::centredLeft);
-    g.drawText ("LENGTH", 318, 0, 54, getHeight(), juce::Justification::centredLeft);
-    g.drawText ("SWING", 538, 0, 46, getHeight(), juce::Justification::centredLeft);
+    g.setFont (juce::Font (juce::FontOptions (10.5f)).boldened());
+    g.drawText ("PTN", 0, 0, 30, getHeight(), juce::Justification::centredLeft);
+    g.drawText ("LENGTH", 378, 0, 50, getHeight(), juce::Justification::centredLeft);
+    g.drawText ("SWING", 584, 0, 40, getHeight(), juce::Justification::centredLeft);
 
     const auto accent = glitch::effectColour (3);
     for (int slot = 0; slot < OpenGlitchAudioProcessor::numPatterns; ++slot)
@@ -465,9 +465,8 @@ void SequencerBar::paint (juce::Graphics& g)
         g.setColour (isActive ? accent.brighter (0.5f) : cellStroke);
         g.drawRoundedRectangle (r, 4.0f, 1.0f);
         g.setColour (isActive ? bg : textDim);
-        g.setFont (juce::Font (juce::FontOptions (12.5f)).boldened());
-        g.drawText (juce::String::charToString ((juce::juce_wchar) ('A' + slot)),
-                    r, juce::Justification::centred);
+        g.setFont (juce::Font (juce::FontOptions (10.0f)).boldened());
+        g.drawText (juce::String (slot + 1), r, juce::Justification::centred);
     }
 }
 
@@ -475,6 +474,7 @@ void SequencerBar::paint (juce::Graphics& g)
 // EffectPanel
 // ---------------------------------------------------------------------------
 EffectPanel::EffectPanel (juce::AudioProcessorValueTreeState& state)
+    : stateRef (state)
 {
     using namespace glitch::palette;
 
@@ -511,6 +511,27 @@ EffectPanel::EffectPanel (juce::AudioProcessorValueTreeState& state)
         addChildComponent (modSyncLabel);
         modSyncAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
             state, "fx_mod_sync", modSyncBox);
+    }
+
+    outCaption.setText ("OUTPUT", juce::dontSendNotification);
+    outCaption.setFont (juce::Font (juce::FontOptions (12.0f)).boldened());
+    outCaption.setColour (juce::Label::textColourId, glitch::palette::textDim);
+    addAndMakeVisible (outCaption);
+    if (auto* modeParam = dynamic_cast<juce::AudioParameterChoice*> (
+            state.getParameter ("fx1_post_mode")))
+        outModeBox.addItemList (modeParam->choices, 1);
+    addAndMakeVisible (outModeBox);
+    static const char* const outNames[4] = { "FREQ", "PAN", "MIX", "GAIN" };
+    for (int k = 0; k < 4; ++k)
+    {
+        outKnobs[k].slider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+        outKnobs[k].slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 62, 14);
+        addAndMakeVisible (outKnobs[k].slider);
+        outKnobs[k].label.setText (outNames[k], juce::dontSendNotification);
+        outKnobs[k].label.setFont (juce::Font (juce::FontOptions (11.0f)).boldened());
+        outKnobs[k].label.setColour (juce::Label::textColourId, glitch::palette::textDim);
+        outKnobs[k].label.setJustificationType (juce::Justification::centred);
+        addAndMakeVisible (outKnobs[k].label);
     }
 
     setEffect (3);
@@ -561,6 +582,20 @@ void EffectPanel::setEffect (int effectIndex)
     modSyncBox.setVisible (currentEffect == 2);
     modSyncLabel.setVisible (currentEffect == 2);
 
+    // Rebind the OUTPUT strip to this effect's parameters.
+    const auto pid = [this] (const char* s) { return "fx" + juce::String (currentEffect) + "_" + s; };
+    outModeAttachment.reset();
+    outModeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
+        stateRef, pid ("post_mode"), outModeBox);
+    static const char* const outIds[4] = { "post_freq", "pan", "mix", "gain" };
+    for (int k = 0; k < 4; ++k)
+    {
+        outKnobs[k].attachment.reset();
+        outKnobs[k].slider.setColour (juce::Slider::rotarySliderFillColourId, colour);
+        outKnobs[k].attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+            stateRef, pid (outIds[k]), outKnobs[k].slider);
+    }
+
     resized();
     repaint();
 }
@@ -572,16 +607,27 @@ void EffectPanel::resized()
     blurb.setBounds (14, 30, getWidth() - 28, 30);
 
     int x = 10;
-    const int knobW = 92;
+    const int knobW = 84;
     const int top = 62;
     for (auto* knob : knobsForEffect[(size_t) currentEffect])
     {
         knob->nameLabel.setBounds (x, top, knobW, 14);
-        knob->slider.setBounds (x, top + 14, knobW, getHeight() - top - 20);
+        knob->slider.setBounds (x, top + 14, knobW, 84);
         x += knobW + 4;
     }
     modSyncLabel.setBounds (x + 6, top, 90, 14);
     modSyncBox.setBounds (x + 6, top + 20, 90, 22);
+
+    const int outTop = getHeight() - 92;
+    outCaption.setBounds (14, outTop, 70, 14);
+    outModeBox.setBounds (14, outTop + 20, 84, 22);
+    int ox = 108;
+    for (int k = 0; k < 4; ++k)
+    {
+        outKnobs[k].label.setBounds (ox, outTop, 64, 13);
+        outKnobs[k].slider.setBounds (ox, outTop + 13, 64, getHeight() - outTop - 18);
+        ox += 66;
+    }
 }
 
 void EffectPanel::paint (juce::Graphics& g)
@@ -671,8 +717,24 @@ MasterPanel::MasterPanel (juce::AudioProcessorValueTreeState& state)
 {
     addFader (state, "seq_chaos", "CHAOS", juce::Colour (0xffe040fb));
     addFader (state, "master_drive", "DRIVE", juce::Colour (0xffff7043));
+    addFader (state, "master_drive_mix", "D.MIX", juce::Colour (0xffffab91));
+    addFader (state, "master_reso", "RESO", juce::Colour (0xffba68c8));
     addFader (state, "master_lowpass", "FILTER", juce::Colour (0xff4fc3f7));
-    addFader (state, "master_mix", "MIX", glitch::palette::lcd);
+    addFader (state, "master_filter_mix", "F.MIX", juce::Colour (0xff4dd0e1));
+    addFader (state, "seq_declick", "CLICK", juce::Colour (0xffa1887f));
+    addFader (state, "seq_stepenv", "ENV", juce::Colour (0xff90a4ae));
+
+    mixSlider.setSliderStyle (juce::Slider::LinearHorizontal);
+    mixSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 44, 15);
+    mixSlider.setColour (juce::Slider::rotarySliderFillColourId, glitch::palette::lcd);
+    addAndMakeVisible (mixSlider);
+    mixAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        state, "master_mix", mixSlider);
+    mixLabel.setText ("MIX", juce::dontSendNotification);
+    mixLabel.setFont (juce::Font (juce::FontOptions (11.5f)).boldened());
+    mixLabel.setColour (juce::Label::textColourId,
+                        glitch::palette::textDim.interpolatedWith (glitch::palette::lcd, 0.45f));
+    addAndMakeVisible (mixLabel);
 
     if (auto* typeParam = dynamic_cast<juce::AudioParameterChoice*> (
             state.getParameter ("master_filter_type")))
@@ -714,18 +776,24 @@ void MasterPanel::addFader (juce::AudioProcessorValueTreeState& state, const cha
 void MasterPanel::resized()
 {
     const int top = 26;
-    const int bypassH = 32;
-    const int comboH = 24;
-    const int faderW = getWidth() / (int) faders.size();
-    const int faderBottom = getHeight() - bypassH - comboH - 20;
+    const int bypassH = 30;
+    const int comboH = 22;
+    const int mixH = 24;
+    const int faderW = getWidth() / 4;
+    const int bottomZone = bypassH + comboH + mixH + 26;
+    const int rowH = (getHeight() - top - bottomZone) / 2;
     for (size_t i = 0; i < faders.size(); ++i)
     {
-        const int x = (int) i * faderW;
-        faders[i]->nameLabel.setBounds (x, top, faderW, 14);
-        faders[i]->slider.setBounds (x, top + 16, faderW, faderBottom - top - 16);
+        const int x = ((int) i % 4) * faderW;
+        const int y = top + ((int) i / 4) * rowH;
+        faders[i]->nameLabel.setBounds (x, y, faderW, 14);
+        faders[i]->slider.setBounds (x, y + 16, faderW, rowH - 20);
     }
-    filterTypeBox.setBounds (10, getHeight() - bypassH - comboH - 12, getWidth() - 20, comboH);
-    bypassButton.setBounds (10, getHeight() - bypassH - 8, getWidth() - 20, bypassH);
+    const int mixY = getHeight() - bottomZone + 2;
+    mixLabel.setBounds (8, mixY, 30, mixH);
+    mixSlider.setBounds (38, mixY, getWidth() - 44, mixH);
+    filterTypeBox.setBounds (10, mixY + mixH + 4, getWidth() - 20, comboH);
+    bypassButton.setBounds (10, getHeight() - bypassH - 6, getWidth() - 20, bypassH);
 }
 
 void MasterPanel::paint (juce::Graphics& g)
@@ -773,6 +841,12 @@ OpenGlitchAudioProcessorEditor::OpenGlitchAudioProcessorEditor (OpenGlitchAudioP
     addAndMakeVisible (clearButton);
     diceButton.onClick = [this] { processorRef.randomizeActivePattern(); };
     addAndMakeVisible (diceButton);
+    fxDiceButton.onClick = [this] { processorRef.randomizeFxKnobs(); };
+    addAndMakeVisible (fxDiceButton);
+    shiftLeftButton.onClick = [this] { processorRef.shiftActivePattern (-1); };
+    addAndMakeVisible (shiftLeftButton);
+    shiftRightButton.onClick = [this] { processorRef.shiftActivePattern (1); };
+    addAndMakeVisible (shiftRightButton);
 
     statusLabel.setFont (juce::Font (juce::FontOptions (
         juce::Font::getDefaultMonospacedFontName(), 11.0f, juce::Font::plain)));
@@ -781,7 +855,7 @@ OpenGlitchAudioProcessorEditor::OpenGlitchAudioProcessorEditor (OpenGlitchAudioP
 
     startTimerHz (30);
     timerCallback(); // seed the LCD before the first tick
-    setSize (940, 620);
+    setSize (940, 700);
 }
 
 OpenGlitchAudioProcessorEditor::~OpenGlitchAudioProcessorEditor()
@@ -796,8 +870,7 @@ void OpenGlitchAudioProcessorEditor::timerCallback()
     const int step = processorRef.getCurrentStep();
     const auto stepText = step >= 0 ? juce::String::formatted ("STEP %02d", step + 1)
                                     : juce::String ("STOPPED");
-    const auto pattern = juce::String::charToString (
-        (juce::juce_wchar) ('A' + processorRef.getActivePattern()));
+    const auto pattern = juce::String (processorRef.getActivePattern() + 1);
     lcdLabel.setText (pattern + " | " + stepText + " | "
                           + juce::String (processorRef.getDisplayBpm(), 1) + " BPM",
                       juce::dontSendNotification);
@@ -857,8 +930,12 @@ void OpenGlitchAudioProcessorEditor::resized()
     effectPanel.setBounds (margin, bottomY, 380, bottomH);
     lfoPanel.setBounds (margin + 390, bottomY, matrixRight - margin - 390, bottomH);
 
-    lcdLabel.setBounds (getWidth() - margin - 220, 20, 214, 26);
-    clearButton.setBounds (getWidth() - margin - 220 - 78, 20, 64, 26);
-    diceButton.setBounds (getWidth() - margin - 220 - 78 - 72, 20, 64, 26);
+    const int lcdX = getWidth() - margin - 220;
+    lcdLabel.setBounds (lcdX, 20, 214, 26);
+    clearButton.setBounds (lcdX - 66, 20, 58, 26);
+    fxDiceButton.setBounds (lcdX - 66 - 44, 20, 40, 26);
+    diceButton.setBounds (lcdX - 66 - 44 - 58, 20, 54, 26);
+    shiftRightButton.setBounds (lcdX - 66 - 44 - 58 - 32, 20, 28, 26);
+    shiftLeftButton.setBounds (lcdX - 66 - 44 - 58 - 32 - 30, 20, 28, 26);
     statusLabel.setBounds (getWidth() - margin - 300, 48, 294, 13);
 }

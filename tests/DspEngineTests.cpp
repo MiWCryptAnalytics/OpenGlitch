@@ -220,3 +220,79 @@ TEST_CASE ("tie: a spanned effect differs from re-triggered and dry", "[dsp][spa
     REQUIRE (maxDiff (retriggered, dry) > 0.05f);
     REQUIRE (maxDiff (spanned, retriggered) > 0.02f); // and differs from re-triggering
 }
+
+TEST_CASE ("post stage: per-effect pan, filter and envelope shape the wet path", "[dsp][post]")
+{
+    auto channelRms = [] (const std::vector<float>& v, int ch)
+    {
+        double s = 0;
+        long n = 0;
+        for (size_t i = (size_t) ch; i < v.size(); i += 2) { s += (double) v[i] * v[i]; ++n; }
+        return (float) std::sqrt (s / (double) n);
+    };
+
+    // Pan hard left: right channel starves while the gater plays.
+    {
+        HeavyHarness h;
+        h.setAllSteps (7.0f);
+        h.set ("glitch_post_pan", -1.0f);
+        h.set ("host_playing", 1.0f);
+        h.run (0.5);
+        auto out = h.run (1.0);
+        REQUIRE (channelRms (out, 0) > channelRms (out, 1) * 3.0f);
+    }
+
+    // Post lowpass at 300Hz dims the square-ish gater output.
+    {
+        HeavyHarness open_, lp;
+        for (auto* h : { &open_, &lp }) { h->setAllSteps (7.0f); }
+        lp.set ("glitch_post_mode", 1.0f);
+        lp.set ("glitch_post_freq", 300.0f);
+        open_.set ("host_playing", 1.0f);
+        lp.set ("host_playing", 1.0f);
+        open_.run (0.5);
+        lp.run (0.5);
+        REQUIRE (rms (lp.run (1.0)) < rms (open_.run (1.0)) * 0.9f);
+    }
+
+    // Full step envelope decays each step: quieter than no envelope.
+    {
+        HeavyHarness flat, env;
+        env.set ("seq_stepenv", 1.0f);
+        for (auto* h : { &flat, &env }) { h->setAllSteps (0.0f); h->set ("host_playing", 1.0f); h->run (0.5); }
+        REQUIRE (rms (env.run (1.0)) < rms (flat.run (1.0)) * 0.85f);
+    }
+}
+
+TEST_CASE ("master: drive mix, resonance and filter mix are live", "[dsp][master]")
+{
+    auto runWith = [] (std::initializer_list<std::pair<const char*, float>> params)
+    {
+        HeavyHarness h;
+        h.setAllSteps (0.0f);
+        for (const auto& [name, v] : params)
+            h.set (name, v);
+        h.set ("host_playing", 1.0f);
+        h.run (0.5);
+        return h.run (1.0);
+    };
+
+    // Full drive distorts; drive mix 0 restores the clean signal.
+    auto clean = runWith ({});
+    auto driven = runWith ({ { "master_drive", 10.0f } });
+    auto parallel0 = runWith ({ { "master_drive", 10.0f }, { "master_drive_mix", 0.0f } });
+    REQUIRE (maxDiff (driven, clean) > 0.05f);
+    REQUIRE (maxDiff (parallel0, clean) < 0.02f);
+
+    // Resonance audibly rings against the plain filtered path.
+    auto plain = runWith ({ { "master_lowpass", 500.0f } });
+    auto ringing = runWith ({ { "master_lowpass", 500.0f }, { "master_reso", 1.0f } });
+    REQUIRE (maxDiff (ringing, plain) > 0.02f);
+
+    // Filter mix 0 bypasses even a brutal highpass.
+    auto hp = runWith ({ { "master_filter_type", 1.0f }, { "master_lowpass", 8000.0f } });
+    auto hpBypassed = runWith ({ { "master_filter_type", 1.0f }, { "master_lowpass", 8000.0f },
+                                 { "master_filter_mix", 0.0f } });
+    REQUIRE (rms (hp) < rms (clean) * 0.2f);
+    REQUIRE (rms (hpBypassed) > rms (clean) * 0.8f);
+}

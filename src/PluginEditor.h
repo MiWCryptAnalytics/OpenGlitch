@@ -116,12 +116,26 @@ private:
 
     Knob* addKnob (juce::AudioProcessorValueTreeState& state, const char* paramID, const char* name);
 
+    juce::AudioProcessorValueTreeState& stateRef;
     std::vector<std::unique_ptr<Knob>> knobs;
     std::array<std::vector<Knob*>, 10> knobsForEffect;
     juce::Label title, blurb;
     juce::ComboBox modSyncBox;
     juce::Label modSyncLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> modSyncAttachment;
+
+    // Per-effect output strip: rebinds to the selected effect's fxN_* params.
+    juce::Label outCaption;
+    juce::ComboBox outModeBox;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> outModeAttachment;
+    struct OutKnob
+    {
+        juce::Slider slider;
+        juce::Label label;
+        std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
+    };
+    OutKnob outKnobs[4]; // freq, pan, mix, gain
+
     int currentEffect = 3;
 };
 
@@ -168,6 +182,9 @@ private:
                    const char* name, juce::Colour colour);
 
     std::vector<std::unique_ptr<Fader>> faders;
+    juce::Slider mixSlider;
+    juce::Label mixLabel;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mixAttachment;
     juce::ComboBox filterTypeBox;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> filterTypeAttachment;
     juce::TextButton bypassButton { "BYPASS" };
@@ -199,6 +216,9 @@ private:
     juce::Label statusLabel; // transport/tick diagnostics
     juce::TextButton clearButton { "CLEAR" };
     juce::TextButton diceButton { "DICE" };
+    juce::TextButton fxDiceButton { "FX" };
+    juce::TextButton shiftLeftButton { "<" };
+    juce::TextButton shiftRightButton { ">" };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (OpenGlitchAudioProcessorEditor)
 };

@@ -449,3 +449,67 @@ TEST_CASE ("host: tie spans run an effect across beats", "[host][span]")
     REQUIRE (maxDiff (spanned, dry) > 0.05f);
     REQUIRE (maxDiff (spanned, single) > 0.02f);
 }
+
+TEST_CASE ("host: per-effect output strip is dispatched with the trigger", "[host][post]")
+{
+    auto channelRms = [] (const std::vector<float>& v, int ch)
+    {
+        double s = 0;
+        long n = 0;
+        for (size_t i = (size_t) ch; i < v.size(); i += 2) { s += (double) v[i] * v[i]; ++n; }
+        return (float) std::sqrt (s / (double) n);
+    };
+
+    Harness h;
+    h.playhead.playing = true;
+    h.setAllSteps (3.0f);            // retrigger everywhere
+    h.setParam ("fx3_pan", -1.0f);   // its strip pans hard left
+    h.run (0.5);
+    auto out = h.run (1.5);
+    REQUIRE (channelRms (out, 0) > channelRms (out, 1) * 2.0f);
+}
+
+TEST_CASE ("host: FX dice with a seed is reproducible", "[host][dice]")
+{
+    auto rollTwice = [] (float seed)
+    {
+        Harness h;
+        h.setParam ("seq_seed", seed);
+        h.proc.randomizeFxKnobs();
+        std::vector<float> values;
+        for (auto* id : { "fx_mod_freq", "fx_gate_rate", "fx3_pan", "fx7_post_freq" })
+            values.push_back (h.proc.apvts.getRawParameterValue (id)->load());
+        return values;
+    };
+
+    auto a = rollTwice (42.0f);
+    auto b = rollTwice (42.0f);
+    auto c = rollTwice (43.0f);
+    REQUIRE (a == b);
+    REQUIRE (a != c);
+}
+
+TEST_CASE ("host: shift rotates the pattern within its length", "[host][shift]")
+{
+    Harness h;
+    h.setAllSteps (0.0f);
+    h.setParam ("step_1", 3.0f);
+    h.setParam ("seq_length", 4.0f);
+    h.proc.shiftActivePattern (1);
+    REQUIRE (juce::exactlyEqual (h.proc.apvts.getRawParameterValue ("step_2")->load(), 3.0f));
+    h.proc.shiftActivePattern (1);
+    h.proc.shiftActivePattern (1);
+    h.proc.shiftActivePattern (1); // full cycle within length 4: back to the start
+    REQUIRE (juce::exactlyEqual (h.proc.apvts.getRawParameterValue ("step_1")->load(), 3.0f));
+    REQUIRE (juce::exactlyEqual (h.proc.apvts.getRawParameterValue ("step_2")->load(), 0.0f));
+}
+
+TEST_CASE ("host: 16 pattern banks, midi note 51 selects the last", "[host][pattern]")
+{
+    Harness h;
+    h.playhead.playing = true;
+    h.midi.addEvent (juce::MidiMessage::noteOn (1, 51, (juce::uint8) 100), 0);
+    h.run (0.05);
+    juce::MessageManager::getInstance()->runDispatchLoopUntil (200);
+    REQUIRE (h.proc.getActivePattern() == 15);
+}

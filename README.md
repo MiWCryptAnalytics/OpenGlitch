@@ -37,6 +37,19 @@ Feature complete for 1.0:
   the master faders (bandpass is a hip~/lop~ series pair).
 - **Tempo-synced ring modulator** — a SYNC selector on the Modulator panel
   locks its frequency to divisions from 1/16 to a full bar.
+- **Per-effect output strips** — every effect has its own filter
+  (Off/LP/HP/BP + freq), pan, mix and gain, like the original's column
+  strips. Implemented as one shared post stage that snaps to whichever
+  effect fires (only one sounds at a time); live tweaks stream instantly.
+- **De-Click** (gate crossfade 1-30 ms) and **Step Envelope** (per-step
+  decay) from the original's top row.
+- **Randomise FX + Seed** — the FX button dices every effect knob and
+  output strip; a non-zero Seed makes rolls reproducible, advancing per
+  press like the original.
+- **Master extras** — Overdrive Mix (parallel drive), filter Resonance
+  (bp~ peak layered on the cutoff) and Filter Mix.
+- **16 pattern banks** (MIDI notes C1-D#2 / 36-51 switch them live) and
+  **pattern Shift arrows** (< > rotate the grid within its length).
 - **Two tempo-synced LFOs** (sine/tri/saw/square/S&H random, 1/16 to 4 bars,
   ppq-locked to the DAW bar). Targets: filter freq, drive, chaos, mod freq,
   retrigger pitch, gate duty — and LFO 2 can instead drive **LFO 1's rate or

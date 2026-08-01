@@ -71,16 +71,56 @@ juce::AudioProcessorValueTreeState::ParameterLayout OpenGlitchAudioProcessor::cr
     sequencer->addChild (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID ("seq_chaos", 1), "Chaos",
         juce::NormalisableRange<float> (0.0f, 1.0f), 0.0f, percentAttributes()));
+    juce::StringArray patternNames;
+    for (int i = 1; i <= 16; ++i)
+        patternNames.add (juce::String (i));
     sequencer->addChild (std::make_unique<juce::AudioParameterChoice> (
-        juce::ParameterID ("pattern_select", 1), "Pattern",
-        juce::StringArray { "A", "B", "C", "D", "E", "F", "G", "H" }, 0));
+        juce::ParameterID ("pattern_select", 1), "Pattern", patternNames, 0));
     sequencer->addChild (makeInt ("seq_length", "Pattern Length", 1, 16, 16, "steps"));
     sequencer->addChild (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID ("seq_swing", 1), "Swing",
         juce::NormalisableRange<float> (0.0f, 0.5f), 0.0f,
         juce::AudioParameterFloatAttributes().withStringFromValueFunction (
             [] (float v, int) { return juce::String ((int) std::round (v * 200.0f)) + " %"; })));
+    sequencer->addChild (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID ("seq_declick", 1), "De-Click",
+        juce::NormalisableRange<float> (1.0f, 30.0f), 5.0f,
+        juce::AudioParameterFloatAttributes().withLabel ("ms").withStringFromValueFunction (
+            [] (float v, int) { return juce::String (v, 1); })));
+    sequencer->addChild (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID ("seq_stepenv", 1), "Step Envelope",
+        juce::NormalisableRange<float> (0.0f, 1.0f), 0.0f, percentAttributes()));
+    sequencer->addChild (makeInt ("seq_seed", "Seed", 0, 999, 0, ""));
     layout.add (std::move (sequencer));
+
+    // Per-effect output strips: filter/pan/mix/gain per effect, applied by a
+    // shared post stage snapped to whichever effect fires.
+    auto post = std::make_unique<juce::AudioProcessorParameterGroup> ("fx_post", "Effect Output", "|");
+    for (int n = 1; n <= 9; ++n)
+    {
+        const auto pid = [n] (const char* s) { return "fx" + juce::String (n) + "_" + s; };
+        const auto pname = [&] (const char* s) { return effectNames[n] + " " + s; };
+        post->addChild (std::make_unique<juce::AudioParameterChoice> (
+            juce::ParameterID (pid ("post_mode"), 1), pname ("Filter"),
+            juce::StringArray { "Off", "Lowpass", "Highpass", "Bandpass" }, 0));
+        post->addChild (makeHz (pid ("post_freq").toRawUTF8(), pname ("Filter Freq").toRawUTF8(),
+                                100.0f, 20000.0f, 2000.0f, 2000.0f));
+        post->addChild (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID (pid ("pan"), 1), pname ("Pan"),
+            juce::NormalisableRange<float> (-1.0f, 1.0f), 0.0f,
+            juce::AudioParameterFloatAttributes().withStringFromValueFunction (
+                [] (float v, int)
+                {
+                    if (std::abs (v) < 0.01f) return juce::String ("C");
+                    return (v < 0 ? "L" : "R") + juce::String ((int) std::round (std::abs (v) * 100.0f));
+                })));
+        post->addChild (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID (pid ("mix"), 1), pname ("Mix"),
+            juce::NormalisableRange<float> (0.0f, 1.0f), 1.0f, percentAttributes()));
+        post->addChild (makeFloat (pid ("gain").toRawUTF8(), pname ("Gain").toRawUTF8(),
+                                   0.0f, 2.0f, 1.0f, 0.0f, "x"));
+    }
+    layout.add (std::move (post));
 
     auto effects = std::make_unique<juce::AudioProcessorParameterGroup> ("effects", "Effects", "|");
     effects->addChild (makeFloat ("fx_tapestop_speed", "Tape Stop Speed", 0.1f, 4.0f, 1.0f, 1.0f, "x step"));
@@ -107,6 +147,15 @@ juce::AudioProcessorValueTreeState::ParameterLayout OpenGlitchAudioProcessor::cr
     master->addChild (std::make_unique<juce::AudioParameterChoice> (
         juce::ParameterID ("master_filter_type", 1), "Filter Type",
         juce::StringArray { "Lowpass", "Highpass", "Bandpass" }, 0));
+    master->addChild (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID ("master_drive_mix", 1), "Drive Mix",
+        juce::NormalisableRange<float> (0.0f, 1.0f), 1.0f, percentAttributes()));
+    master->addChild (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID ("master_reso", 1), "Resonance",
+        juce::NormalisableRange<float> (0.0f, 1.0f), 0.0f, percentAttributes()));
+    master->addChild (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID ("master_filter_mix", 1), "Filter Mix",
+        juce::NormalisableRange<float> (0.0f, 1.0f), 1.0f, percentAttributes()));
     master->addChild (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID ("master_mix", 1), "Mix",
         juce::NormalisableRange<float> (0.0f, 1.0f), 1.0f, percentAttributes()));
@@ -160,11 +209,12 @@ OpenGlitchAudioProcessor::OpenGlitchAudioProcessor()
     static const char* const linkedIds[] = {
         "step_1", "step_2", "step_3", "step_4", "step_5", "step_6", "step_7", "step_8",
         "step_9", "step_10", "step_11", "step_12", "step_13", "step_14", "step_15", "step_16",
-        "seq_chaos", "seq_length", "seq_swing",
+        "seq_chaos", "seq_length", "seq_swing", "seq_declick", "seq_stepenv",
         "fx_tapestop_speed", "fx_mod_freq", "fx_retrigger_rate", "fx_retrigger_pitch",
         "fx_shuffle_range", "fx_crush_rate", "fx_crush_drive", "fx_gate_rate", "fx_gate_duty",
         "fx_delay_div", "fx_delay_feedback", "fx_stretch_speed",
-        "master_drive", "master_lowpass", "master_filter_type", "master_mix", "bypass"
+        "master_drive", "master_drive_mix", "master_lowpass", "master_filter_type",
+        "master_reso", "master_filter_mix", "master_mix", "bypass"
     };
 
     for (auto* id : linkedIds)
@@ -190,6 +240,17 @@ OpenGlitchAudioProcessor::OpenGlitchAudioProcessor()
         for (int i = 0; i < 4; ++i)
             lfoRaw[n][i] = apvts.getRawParameterValue ("lfo" + juce::String (n + 1) + "_" + lfoIds[i]);
     modSyncRaw = apvts.getRawParameterValue ("fx_mod_sync");
+
+    static const char* const postIds[] = { "post_mode", "post_freq", "pan", "mix", "gain" };
+    static const char* const postReceivers[] = { "glitch_post_mode", "glitch_post_freq",
+                                                 "glitch_post_pan", "glitch_post_mix",
+                                                 "glitch_post_gain" };
+    for (int n = 0; n < 9; ++n)
+        for (int k = 0; k < 5; ++k)
+            postRaw[n][k] = apvts.getRawParameterValue ("fx" + juce::String (n + 1) + "_" + postIds[k]);
+    for (int k = 0; k < 5; ++k)
+        postHash[k] = hv_stringToHash (postReceivers[k]);
+    seedRaw = apvts.getRawParameterValue ("seq_seed");
 
     // Pattern system wiring
     patternParam = dynamic_cast<juce::AudioParameterChoice*> (apvts.getParameter ("pattern_select"));
@@ -260,9 +321,61 @@ void OpenGlitchAudioProcessor::loadPattern (int slot)
         lengthParam->convertTo0to1 ((float) (int) pattern.getProperty ("length", 16)));
 }
 
+// Seed > 0 gives reproducible dice rolls, advancing per press like the original.
+static juce::Random makeSeededRng (std::atomic<float>* seedRaw, int& pressCount)
+{
+    const int seed = (int) std::lround (seedRaw->load());
+    if (seed > 0)
+        return juce::Random ((juce::int64) seed * 1000 + pressCount++);
+    return juce::Random (juce::Random::getSystemRandom().nextInt64());
+}
+
+void OpenGlitchAudioProcessor::randomizeFxKnobs()
+{
+    auto rng = makeSeededRng (seedRaw, dicePressCount);
+
+    juce::StringArray ids { "fx_tapestop_speed", "fx_mod_freq", "fx_mod_sync",
+                            "fx_retrigger_rate", "fx_retrigger_pitch", "fx_shuffle_range",
+                            "fx_crush_rate", "fx_crush_drive", "fx_gate_rate", "fx_gate_duty",
+                            "fx_delay_div", "fx_delay_feedback", "fx_stretch_speed" };
+    static const char* const postIds[] = { "post_mode", "post_freq", "pan", "mix", "gain" };
+    for (int n = 1; n <= 9; ++n)
+        for (auto* s : postIds)
+            ids.add ("fx" + juce::String (n) + "_" + s);
+
+    for (const auto& id : ids)
+    {
+        auto* p = apvts.getParameter (id);
+        jassert (p != nullptr);
+        float v = rng.nextFloat();
+        if (id.endsWith ("_gain"))
+            v = 0.4f + v * 0.35f; // 0.8x..1.5x — never silence a step
+        else if (id.endsWith ("_mix"))
+            v = 0.5f + v * 0.5f;
+        p->setValueNotifyingHost (v);
+    }
+}
+
+void OpenGlitchAudioProcessor::shiftActivePattern (int direction)
+{
+    const int length = juce::jlimit (1, 16, (int) std::lround (lengthRaw->load()));
+    std::array<int, 16> values {};
+    for (int i = 0; i < 16; ++i)
+        values[(size_t) i] = (int) std::lround (paramLinks[(size_t) i].value->load());
+
+    const juce::ScopedValueSetter<bool> loading (loadingPattern, true);
+    for (int i = 0; i < length; ++i)
+    {
+        const int from = ((i - direction) % length + length) % length;
+        auto* p = stepParams[(size_t) i];
+        p->setValueNotifyingHost (p->convertTo0to1 ((float) values[(size_t) from]));
+    }
+    storePattern (activeSlot);
+}
+
 void OpenGlitchAudioProcessor::randomizeActivePattern()
 {
-    auto& rng = juce::Random::getSystemRandom();
+    auto rng = makeSeededRng (seedRaw, dicePressCount);
     const juce::ScopedValueSetter<bool> loading (loadingPattern, true);
     int previous = 0;
     for (auto* p : stepParams)
@@ -322,6 +435,9 @@ void OpenGlitchAudioProcessor::prepareToPlay (double sampleRate, int samplesPerB
     // The default 2KB input queue overflows on the first block (defaults +
     // full APVTS push + transport all land before the first process call),
     // silently dropping the later messages. 32KB gives ample headroom.
+    activePostEffect = 0;
+    std::fill (std::begin (lastSentPost), std::end (lastSentPost),
+               std::numeric_limits<float>::quiet_NaN());
     heavy.reset (hv_OpenGlitch_new_with_options (sampleRate, 10, 32, 2));
     hv_setUserData (heavy.get(), this);
     hv_setSendHook (heavy.get(), heavySendHook);
@@ -456,6 +572,20 @@ void OpenGlitchAudioProcessor::updateLfos (int numSamples)
         modContrib[target1] += (float) v1;
 }
 
+void OpenGlitchAudioProcessor::pushPostParameters()
+{
+    // Live knob tweaks of the currently sounding effect stream immediately.
+    if (activePostEffect < 1)
+        return;
+    for (int k = 0; k < 5; ++k)
+    {
+        const float v = postRaw[activePostEffect - 1][k]->load (std::memory_order_relaxed);
+        if (! juce::exactlyEqual (v, lastSentPost[k]))
+            if (hv_sendFloatToReceiver (heavy.get(), postHash[k], v))
+                lastSentPost[k] = v;
+    }
+}
+
 void OpenGlitchAudioProcessor::pushChangedParameters()
 {
     for (auto& link : paramLinks)
@@ -573,6 +703,23 @@ void OpenGlitchAudioProcessor::pushTransport (int numSamples)
             // Scheduled at the same offset as its tick so paired values stay
             // coherent even with several ticks inside one block.
             hv_sendMessageToReceiverV (heavy.get(), spanHash, delayMs, "f", (double) spanAt (step));
+
+            // Snap the shared output stage to the firing effect's stored
+            // settings (neutral for dry; ties keep the previous settings).
+            const int v = (int) std::lround (paramLinks[(size_t) step].value->load());
+            if (v != 10)
+            {
+                static const float neutral[5] = { 0.0f, 20000.0f, 0.0f, 1.0f, 1.0f };
+                const int effect = (v >= 1 && v <= 9) ? v : 0;
+                for (int k = 0; k < 5; ++k)
+                {
+                    const float pv = effect > 0 ? postRaw[effect - 1][k]->load() : neutral[k];
+                    hv_sendMessageToReceiverV (heavy.get(), postHash[k], delayMs, "f", (double) pv);
+                    lastSentPost[k] = pv;
+                }
+                activePostEffect = effect;
+            }
+
             sendTick (step, delayMs);
             lastFiredTick = g;
         };
@@ -623,6 +770,7 @@ void OpenGlitchAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
     updateLfos (buffer.getNumSamples());
     pushChangedParameters();
+    pushPostParameters();
     pushTransport (buffer.getNumSamples());
 
     const int numSamples = buffer.getNumSamples();

@@ -56,10 +56,12 @@ public:
     // Pattern system: 8 slots (A..H) stored in the APVTS state tree. The step
     // and length parameters always hold the *active* pattern; edits are
     // recorded into the selected slot, switching loads another slot.
-    static constexpr int numPatterns = 8;
+    static constexpr int numPatterns = 16;
     int getActivePattern() const noexcept { return activeSlot; }
     void copyActivePatternTo (int slot); // message thread only (shift-click in the UI)
     void randomizeActivePattern();       // message thread only (the DICE button)
+    void randomizeFxKnobs();             // message thread only (the FX dice button)
+    void shiftActivePattern (int direction); // message thread only (< > arrows)
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
@@ -117,6 +119,17 @@ private:
     float modContrib[lfo::numTargets] = {};
     std::atomic<float>* lfoRaw[2][4] = {}; // [lfo][shape, rate, depth, target]
     std::atomic<float>* modSyncRaw = nullptr;
+
+    // Per-effect output stage (shared glitch_post receivers): the firing
+    // effect's stored settings are dispatched with each trigger, and live
+    // knob tweaks of the sounding effect stream immediately.
+    void pushPostParameters();
+    std::atomic<float>* postRaw[9][5] = {}; // [effect][mode, freq, pan, mix, gain]
+    hv_uint32_t postHash[5] = {};
+    int activePostEffect = 0; // audio thread; 0 = dry/neutral
+    float lastSentPost[5] = {};
+    std::atomic<float>* seedRaw = nullptr;
+    int dicePressCount = 0;
 
     juce::AudioParameterBool* bypassParam = nullptr;
 

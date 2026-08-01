@@ -56,3 +56,5 @@
 #X connect 23 0 25 1;
 #X connect 24 0 26 0;
 #X connect 25 0 27 0;
+#X obj 800 20 r glitch_fade;
+#X connect 28 0 22 1;
