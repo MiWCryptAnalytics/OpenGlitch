@@ -605,3 +605,19 @@ TEST_CASE ("reverser: per-channel amounts", "[dsp][fx]")
     REQUIRE (channelDiff (out, in, 1) < 0.05f); // right at 0% plays forward
     REQUIRE (channelDiff (out, in, 0) > 0.05f); // left at 100% still reverses
 }
+
+TEST_CASE ("stretcher: consecutive steps scrub instead of click", "[dsp][fx]")
+{
+    // Each step start rewinds the read pointer by half a step; the lop~ slew
+    // turns that skip into a fast tape flick. Unslewed it was a 0.5 jump.
+    HeavyHarness h;
+    h.set ("host_playing", 1.0f);
+    h.setAllSteps (9.0f);
+    auto out = h.run (2.0);
+    REQUIRE (allFinite (out));
+
+    float worst = 0;
+    for (size_t i = (size_t) (0.15 * SR) * 2 + 2; i < out.size(); i += 2)
+        worst = std::max (worst, std::fabs (out[i] - out[i - 2]));
+    REQUIRE (worst < 0.25f);
+}
