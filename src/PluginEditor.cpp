@@ -784,8 +784,9 @@ void OpenGlitchAudioProcessorEditor::paint (juce::Graphics& g)
 
     g.setColour (textDim);
     g.setFont (juce::Font (juce::FontOptions (12.0f)));
-    g.drawText (juce::String::fromUTF8 ("a dblue Glitch 1.3 tribute  \xc2\xb7  Pure Data \xe2\x86\x92 hvcc \xe2\x86\x92 JUCE"),
-                22, 40, 400, 16, juce::Justification::centredLeft);
+    g.drawText (juce::String::fromUTF8 ("a dblue Glitch 1.3 tribute  \xc2\xb7  Pure Data \xe2\x86\x92 hvcc \xe2\x86\x92 JUCE")
+                    + "  |  build " + __DATE__ + " " + __TIME__,
+                22, 40, 520, 16, juce::Justification::centredLeft);
 
     // LCD bezel
     g.setColour (juce::Colour (0xff0d1f16));

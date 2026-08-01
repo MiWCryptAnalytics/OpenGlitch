@@ -199,6 +199,113 @@ TEST_CASE ("host: highpass mode thins the tone through the processor", "[host][f
     REQUIRE (rms (out) < rms (in) * 0.5f);
 }
 
+// Flush the pattern system's async updater the way a DAW's message loop would.
+static void pumpMessages (int ms = 60)
+{
+    juce::MessageManager::getInstance()->runDispatchLoopUntil (ms);
+}
+
+TEST_CASE ("host: clearing the grid mid-playback goes dry", "[host][pattern]")
+{
+    Harness h;
+    h.playhead.playing = true;
+
+    std::vector<float> in;
+    auto out = h.run (1.0, &in);
+    REQUIRE (maxDiff (out, in) > 0.05f); // demo pattern audibly glitches first
+
+    h.setAllSteps (0.0f); // the CLEAR button
+    pumpMessages();
+    h.run (0.4); // settle crossfades and tails
+
+    std::vector<float> in2;
+    auto out2 = h.run (1.0, &in2);
+    const float ratio = rms (out2) / rms (in2);
+    REQUIRE (maxDiff (out2, in2) < 0.2f);
+    REQUIRE (ratio > 0.85f);
+    REQUIRE (ratio < 1.1f);
+}
+
+TEST_CASE ("host: painting the grid mid-playback engages effects", "[host][pattern]")
+{
+    Harness h;
+    h.playhead.playing = true;
+    h.setAllSteps (0.0f);
+    pumpMessages();
+    h.run (0.5);
+    std::vector<float> inDry;
+    auto dry = h.run (1.0, &inDry);
+    REQUIRE (maxDiff (dry, inDry) < 0.2f); // empty grid passes clean
+
+    h.setAllSteps (7.0f); // paint gater everywhere
+    pumpMessages();
+    h.run (0.2);
+    std::vector<float> in2;
+    auto out2 = h.run (1.0, &in2);
+    REQUIRE (maxDiff (out2, in2) > 0.05f); // now audibly chopped
+}
+
+TEST_CASE ("host: switching pattern slots changes the audible grid", "[host][pattern]")
+{
+    Harness h;
+    h.playhead.playing = true;
+
+    // Slot A: silence the grid. Slot B: paint gaters.
+    h.setAllSteps (0.0f);
+    pumpMessages();
+    h.setParam ("pattern_select", 1.0f);
+    pumpMessages();
+    h.setAllSteps (7.0f);
+    pumpMessages();
+    REQUIRE (h.proc.getActivePattern() == 1);
+
+    // Back to A: the step parameters must reload as the cleared grid.
+    h.setParam ("pattern_select", 0.0f);
+    pumpMessages();
+    REQUIRE (h.proc.getActivePattern() == 0);
+    for (int i = 1; i <= 16; ++i)
+        REQUIRE (h.proc.apvts.getRawParameterValue ("step_" + juce::String (i))->load() == 0.0f);
+
+    h.run (0.4);
+    std::vector<float> inA;
+    auto outA = h.run (1.0, &inA);
+    REQUIRE (maxDiff (outA, inA) < 0.2f); // A plays dry
+
+    h.setParam ("pattern_select", 1.0f);
+    pumpMessages();
+    for (int i = 1; i <= 16; ++i)
+        REQUIRE (h.proc.apvts.getRawParameterValue ("step_" + juce::String (i))->load() == 7.0f);
+    h.run (0.2);
+    std::vector<float> inB;
+    auto outB = h.run (1.0, &inB);
+    REQUIRE (maxDiff (outB, inB) > 0.05f); // B glitches
+}
+
+TEST_CASE ("host: cleared grid survives a state save/load round-trip", "[host][pattern][state]")
+{
+    juce::MemoryBlock blob;
+    {
+        Harness h;
+        h.playhead.playing = true;
+        h.run (0.2);
+        h.setAllSteps (0.0f);
+        pumpMessages();
+        h.proc.getStateInformation (blob);
+    }
+
+    Harness h2;
+    h2.proc.setStateInformation (blob.getData(), (int) blob.getSize());
+    pumpMessages();
+    for (int i = 1; i <= 16; ++i)
+        REQUIRE (h2.proc.apvts.getRawParameterValue ("step_" + juce::String (i))->load() == 0.0f);
+
+    h2.playhead.playing = true;
+    h2.run (0.4);
+    std::vector<float> in;
+    auto out = h2.run (1.0, &in);
+    REQUIRE (maxDiff (out, in) < 0.2f); // restored session must NOT play the demo
+}
+
 TEST_CASE ("host: LFO on the filter audibly animates a dry grid", "[host][lfo]")
 {
     Harness still;
