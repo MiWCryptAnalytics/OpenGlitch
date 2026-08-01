@@ -55,6 +55,10 @@ public:
     // 0..1+: how much the engine is changing the audio (rms of out-in vs in).
     float getWetActivity() const noexcept { return diagWet.load (std::memory_order_relaxed); }
 
+    // Per-block output peak history for the LCD waveform (tearing is harmless).
+    float getOutputPeak (int index) const noexcept { return outputPeaks[(size_t) index & 255]; }
+    int getOutputPeakIndex() const noexcept { return outputPeakIndex.load (std::memory_order_relaxed); }
+
     // Pattern system: 8 slots (A..H) stored in the APVTS state tree. The step
     // and length parameters always hold the *active* pattern; edits are
     // recorded into the selected slot, switching loads another slot.
@@ -165,6 +169,8 @@ private:
     std::atomic<float> diagBarPhase { 0.0f };
     std::atomic<float> lfoPhaseA[2] { 0.0f, 0.0f };
     std::atomic<float> lfoValueA[2] { 0.0f, 0.0f };
+    float outputPeaks[256] = {};
+    std::atomic<int> outputPeakIndex { 0 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (OpenGlitchAudioProcessor)
 };

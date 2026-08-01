@@ -47,6 +47,7 @@ public:
     std::function<void (int effectIndex)> onEffectTouched;
 
     void setPlayheadColumn (int column);
+    void advanceFlashes(); // decay trigger flares, driven by the editor timer
     void clearAll();
 
     void paint (juce::Graphics&) override;
@@ -78,6 +79,7 @@ private:
     std::unique_ptr<juce::ParameterAttachment> lengthAttachment;
     int patternLength = 16;
     int playheadColumn = -1;
+    float columnFlash[16] = {}; // per-column trigger flare, decays each tick
     bool pendingClearOnUp = false; // click-in-place toggles; dragging cancels it
     int lastPaintCol = -1, lastPaintRow = -1; // for drag-to-span gestures
 };

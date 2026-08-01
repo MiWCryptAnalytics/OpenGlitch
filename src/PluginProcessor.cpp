@@ -864,6 +864,13 @@ void OpenGlitchAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         const float smoothed = 0.9f * diagWet.load (std::memory_order_relaxed) + 0.1f * instant;
         diagWet.store (smoothed, std::memory_order_relaxed);
     }
+
+    // Amplitude history for the LCD waveform.
+    {
+        const int idx = outputPeakIndex.load (std::memory_order_relaxed);
+        outputPeaks[(size_t) idx & 255] = buffer.getMagnitude (0, 0, processable);
+        outputPeakIndex.store (idx + 1, std::memory_order_relaxed);
+    }
 }
 
 juce::AudioProcessorEditor* OpenGlitchAudioProcessor::createEditor()

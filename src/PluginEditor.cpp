@@ -226,8 +226,29 @@ void StepMatrix::setPlayheadColumn (int column)
     if (playheadColumn != column)
     {
         playheadColumn = column;
+        if (column >= 0 && column < 16)
+            columnFlash[column] = 1.0f;
         repaint();
     }
+}
+
+void StepMatrix::advanceFlashes()
+{
+    bool anyAlive = false;
+    for (auto& flash : columnFlash)
+    {
+        if (flash > 0.02f)
+        {
+            flash *= 0.80f;
+            anyAlive = true;
+        }
+        else
+        {
+            flash = 0.0f;
+        }
+    }
+    if (anyAlive)
+        repaint();
 }
 
 void StepMatrix::clearAll()
@@ -342,6 +363,10 @@ void StepMatrix::paint (juce::Graphics& g)
             g.fillEllipse (lampRect.expanded (3.5f));
             g.setColour (lamp);
         }
+        else if (columnFlash[c] > 0.03f)
+        {
+            g.setColour (lamp.withAlpha (columnFlash[c] * 0.8f)); // fading trail
+        }
         else
         {
             g.setColour (juce::Colour (0xff30353e));
@@ -394,13 +419,16 @@ void StepMatrix::paint (juce::Graphics& g)
                              .reduced (2.0f);
             const bool onPlayhead = playheadColumn >= c && playheadColumn <= end;
             const bool beyondLength = c >= patternLength;
+            float flare = 0.0f;
+            for (int fc = c; fc <= end; ++fc)
+                flare = juce::jmax (flare, columnFlash[fc]);
 
-            if (onPlayhead)
+            if (onPlayhead || flare > 0.05f)
             {
-                g.setColour (colour.withAlpha (0.45f));
-                g.fillRoundedRectangle (block.expanded (3.0f), 5.0f);
+                g.setColour (colour.withAlpha (juce::jmax (onPlayhead ? 0.45f : 0.0f, 0.5f * flare)));
+                g.fillRoundedRectangle (block.expanded (3.0f + 2.5f * flare), 5.0f);
             }
-            auto fill = onPlayhead ? colour.brighter (0.35f) : colour.withAlpha (0.88f);
+            auto fill = onPlayhead ? colour.brighter (0.35f + 0.4f * flare) : colour.withAlpha (0.88f);
             if (beyondLength)
                 fill = fill.withMultipliedAlpha (0.25f);
             g.setColour (fill);
@@ -1099,6 +1127,9 @@ OpenGlitchAudioProcessorEditor::~OpenGlitchAudioProcessorEditor()
 void OpenGlitchAudioProcessorEditor::timerCallback()
 {
     matrix.setPlayheadColumn (processorRef.getCurrentStep());
+    matrix.advanceFlashes();
+    repaint (18, 8, 380, 44);                          // reactive logo glow
+    repaint (lcdLabel.getBounds().expanded (6, 5));    // LCD waveform
 
     const int step = processorRef.getCurrentStep();
     const auto stepText = step >= 0 ? juce::String::formatted ("STEP %02d", step + 1)
@@ -1133,7 +1164,17 @@ void OpenGlitchAudioProcessorEditor::paint (juce::Graphics& g)
     g.setFont (titleFont);
     g.setColour (text);
     g.drawText ("OPEN", 20, 12, openWidth + 4, 30, juce::Justification::centredLeft);
-    g.setColour (glitch::effectColour (3)); // the retrigger amber is the brand
+    const auto brand = glitch::effectColour (3); // the retrigger amber is the brand
+    const float heat = juce::jlimit (0.0f, 1.0f, processorRef.getWetActivity() * 1.4f);
+    if (heat > 0.03f) // the logo runs hot with the engine
+    {
+        g.setColour (brand.withAlpha (0.16f * heat));
+        for (int dx = -2; dx <= 2; dx += 2)
+            for (int dy = -1; dy <= 1; dy += 2)
+                g.drawText ("GLITCH", 20 + openWidth + dx, 12 + dy, 200, 30,
+                            juce::Justification::centredLeft);
+    }
+    g.setColour (brand.interpolatedWith (juce::Colours::white, 0.25f * heat));
     g.drawText ("GLITCH", 20 + openWidth, 12, 200, 30, juce::Justification::centredLeft);
 
     g.setColour (textDim);
@@ -1142,11 +1183,28 @@ void OpenGlitchAudioProcessorEditor::paint (juce::Graphics& g)
                     + "  |  build " + __DATE__ + " " + __TIME__,
                 22, 40, 520, 16, juce::Justification::centredLeft);
 
-    // LCD bezel
+    // LCD bezel with a scrolling output-amplitude trace and CRT scanlines
+    const auto bezel = lcdLabel.getBounds().toFloat().expanded (4.0f, 3.0f);
     g.setColour (juce::Colour (0xff0d1f16));
-    g.fillRoundedRectangle (lcdLabel.getBounds().toFloat().expanded (4.0f, 3.0f), 4.0f);
+    g.fillRoundedRectangle (bezel, 4.0f);
+    {
+        const int points = 104;
+        const int head = processorRef.getOutputPeakIndex();
+        g.setColour (lcd.withAlpha (0.30f));
+        for (int i = 0; i < points; ++i)
+        {
+            const float peak = juce::jlimit (0.0f, 1.0f,
+                processorRef.getOutputPeak (head - points + i) * 1.2f);
+            const float px = bezel.getX() + 4.0f + (bezel.getWidth() - 8.0f) * (float) i / (points - 1);
+            const float ph = juce::jmax (0.6f, (bezel.getHeight() - 8.0f) * 0.5f * peak);
+            g.fillRect (px, bezel.getCentreY() - ph, 1.4f, ph * 2.0f);
+        }
+        g.setColour (juce::Colours::black.withAlpha (0.16f));
+        for (float sy = bezel.getY() + 2.5f; sy < bezel.getBottom() - 2.0f; sy += 3.0f)
+            g.fillRect (bezel.getX() + 2.0f, sy, bezel.getWidth() - 4.0f, 1.0f);
+    }
     g.setColour (lcd.withAlpha (0.25f));
-    g.drawRoundedRectangle (lcdLabel.getBounds().toFloat().expanded (4.0f, 3.0f), 4.0f, 1.0f);
+    g.drawRoundedRectangle (bezel, 4.0f, 1.0f);
 }
 
 void OpenGlitchAudioProcessorEditor::resized()
