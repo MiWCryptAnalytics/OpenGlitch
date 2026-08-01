@@ -120,24 +120,58 @@ void OpenGlitchLookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, i
 {
     using namespace glitch::palette;
 
+    // Console-fader treatment: a recessed slot with scale ticks, a lit value
+    // bar, and a machined cap that casts a shadow so it sits above the panel.
+    const auto fill = slider.findColour (juce::Slider::rotarySliderFillColourId);
+
+    auto drawCap = [&g, &fill] (juce::Rectangle<float> cap, bool horizontal)
+    {
+        juce::DropShadow (juce::Colours::black.withAlpha (0.55f), 5, { 0, 2 })
+            .drawForRectangle (g, cap.toNearestInt());
+        juce::ColourGradient metal (juce::Colour (0xffd9dee5), cap.getCentreX(), cap.getY(),
+                                    juce::Colour (0xff868d98), cap.getCentreX(), cap.getBottom(), false);
+        g.setGradientFill (metal);
+        g.fillRoundedRectangle (cap, 3.0f);
+        g.setColour (juce::Colour (0xff14161a));
+        g.drawRoundedRectangle (cap, 3.0f, 1.0f);
+        g.setColour (juce::Colours::white.withAlpha (0.4f));
+        g.fillRect (cap.getX() + 2.5f, cap.getY() + 1.2f, cap.getWidth() - 5.0f, 1.0f);
+        g.setColour (fill.darker (0.1f));
+        if (horizontal)
+            g.fillRect (cap.getCentreX() - 1.0f, cap.getY() + 2.5f, 2.0f, cap.getHeight() - 5.0f);
+        else
+            g.fillRect (cap.getX() + 2.5f, cap.getCentreY() - 1.0f, cap.getWidth() - 5.0f, 2.0f);
+    };
+
     if (style == juce::Slider::LinearHorizontal)
     {
         const float cy = (float) y + (float) height * 0.5f;
-        const auto fill = slider.findColour (juce::Slider::rotarySliderFillColourId);
 
-        juce::Rectangle<float> track ((float) x, cy - 3.0f, (float) width, 6.0f);
-        g.setColour (juce::Colour (0xff30353e));
-        g.fillRoundedRectangle (track, 3.0f);
+        juce::Rectangle<float> slot ((float) x, cy - 3.5f, (float) width, 7.0f);
+        g.setColour (juce::Colour (0xff0c0e11));
+        g.fillRoundedRectangle (slot, 3.5f);
+        g.setColour (juce::Colours::white.withAlpha (0.07f)); // bottom lip catches the light
+        g.fillRect (slot.getX(), slot.getBottom(), slot.getWidth(), 1.0f);
 
-        juce::Rectangle<float> filled ((float) x, cy - 3.0f, sliderPos - (float) x, 6.0f);
-        g.setColour (fill.withAlpha (0.85f));
-        g.fillRoundedRectangle (filled, 3.0f);
+        g.setColour (juce::Colours::white.withAlpha (0.10f));
+        for (int t = 0; t <= 4; ++t)
+        {
+            const float tx = (float) x + (float) width * (float) t * 0.25f;
+            g.fillRect (tx - 0.5f, cy - 8.0f, 1.0f, 3.5f);
+            g.fillRect (tx - 0.5f, cy + 4.5f, 1.0f, 3.5f);
+        }
 
-        juce::Rectangle<float> thumb (sliderPos - 4.0f, cy - 9.0f, 8.0f, 18.0f);
-        g.setColour (text);
-        g.fillRoundedRectangle (thumb, 3.0f);
-        g.setColour (cellStroke);
-        g.drawRoundedRectangle (thumb, 3.0f, 1.0f);
+        if (sliderPos > (float) x + 1.0f)
+        {
+            juce::Rectangle<float> lit ((float) x + 1.0f, cy - 2.0f, sliderPos - (float) x - 1.0f, 4.0f);
+            g.setColour (fill.withAlpha (0.25f));
+            g.fillRoundedRectangle (lit.expanded (0.0f, 2.0f), 4.0f);
+            juce::ColourGradient charge (fill.withAlpha (0.45f), (float) x, cy, fill, sliderPos, cy, false);
+            g.setGradientFill (charge);
+            g.fillRoundedRectangle (lit, 2.0f);
+        }
+
+        drawCap ({ sliderPos - 6.5f, cy - 10.0f, 13.0f, 20.0f }, true);
         return;
     }
 
@@ -149,21 +183,33 @@ void OpenGlitchLookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, i
     }
 
     const float cx = (float) x + (float) width * 0.5f;
-    const auto fill = slider.findColour (juce::Slider::rotarySliderFillColourId);
+    const float bottom = (float) y + (float) height;
 
-    juce::Rectangle<float> track (cx - 3.0f, (float) y, 6.0f, (float) height);
-    g.setColour (juce::Colour (0xff30353e));
-    g.fillRoundedRectangle (track, 3.0f);
+    juce::Rectangle<float> slot (cx - 3.5f, (float) y, 7.0f, (float) height);
+    g.setColour (juce::Colour (0xff0c0e11));
+    g.fillRoundedRectangle (slot, 3.5f);
+    g.setColour (juce::Colours::white.withAlpha (0.07f));
+    g.fillRect (slot.getX(), slot.getBottom(), slot.getWidth(), 1.0f);
 
-    juce::Rectangle<float> filled (cx - 3.0f, sliderPos, 6.0f, (float) y + (float) height - sliderPos);
-    g.setColour (fill.withAlpha (0.85f));
-    g.fillRoundedRectangle (filled, 3.0f);
+    g.setColour (juce::Colours::white.withAlpha (0.10f));
+    for (int t = 0; t <= 4; ++t)
+    {
+        const float ty = (float) y + (float) height * (float) t * 0.25f;
+        g.fillRect (cx - 8.0f, ty - 0.5f, 3.5f, 1.0f);
+        g.fillRect (cx + 4.5f, ty - 0.5f, 3.5f, 1.0f);
+    }
 
-    juce::Rectangle<float> thumb (cx - 10.0f, sliderPos - 4.0f, 20.0f, 8.0f);
-    g.setColour (text);
-    g.fillRoundedRectangle (thumb, 3.0f);
-    g.setColour (cellStroke);
-    g.drawRoundedRectangle (thumb, 3.0f, 1.0f);
+    if (sliderPos < bottom - 1.0f)
+    {
+        juce::Rectangle<float> lit (cx - 2.0f, sliderPos, 4.0f, bottom - 1.0f - sliderPos);
+        g.setColour (fill.withAlpha (0.25f));
+        g.fillRoundedRectangle (lit.expanded (2.0f, 0.0f), 4.0f);
+        juce::ColourGradient charge (fill, cx, sliderPos, fill.withAlpha (0.45f), cx, bottom, false);
+        g.setGradientFill (charge);
+        g.fillRoundedRectangle (lit, 2.0f);
+    }
+
+    drawCap ({ cx - 10.0f, sliderPos - 6.5f, 20.0f, 13.0f }, false);
 }
 
 // ---------------------------------------------------------------------------
