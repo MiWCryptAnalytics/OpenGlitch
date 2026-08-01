@@ -113,6 +113,13 @@ if(WIN32)
     target_compile_definitions(OpenGlitchDSP PUBLIC NOMINMAX)
 endif()
 
+# MSVC never defines __SSE*__, so HvUtils.h would silently take the scalar
+# path (HV_N_SIMD 1) — slower and numerically divergent from the other
+# platforms. x64 MSVC compiles SSE4.1 intrinsics without any /arch flag.
+if(MSVC AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+    target_compile_definitions(OpenGlitchDSP PUBLIC HV_SIMD_SSE=1)
+endif()
+
 # ---------------------------------------------------------------------------
 # Embedded assets: the UI fonts (OFL-licensed, licenses alongside the files)
 # ---------------------------------------------------------------------------

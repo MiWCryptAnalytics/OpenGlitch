@@ -345,9 +345,28 @@ TEST_CASE ("tapestop: speed 0.1 parks instead of replaying stale buffer", "[dsp]
     const size_t quarter = (out.size() / 8) * 2; // quarter of the span, even index
     std::vector<float> head (out.begin(), out.begin() + (long) quarter);
     std::vector<float> tail (out.end() - (long) quarter, out.end());
-    // Once fully rewound the read parks at the span start (a held sample of
-    // ~zero) instead of replaying audio from 3.9s ago at full level.
-    REQUIRE (rms (tail) < rms (head) * 0.15f);
+    // Once fully rewound the read parks at the span start, each channel
+    // holding one interpolated sample. The held level is whatever the input
+    // was at that instant — it lands differently per channel and per SIMD
+    // width — so level tells us nothing. Oscillation does: a runaway read
+    // replays the 220Hz fill (~110 crossings per quarter span), a parked
+    // hold barely moves.
+    auto channel = [] (const std::vector<float>& inter, size_t first) {
+        std::vector<float> v;
+        for (size_t i = first; i < inter.size(); i += 2)
+            v.push_back (inter[i]);
+        return v;
+    };
+    auto crossings = [] (const std::vector<float>& v) {
+        int n = 0;
+        for (size_t i = 1; i < v.size(); ++i)
+            if ((v[i - 1] < 0.0f) != (v[i] < 0.0f))
+                ++n;
+        return n;
+    };
+    REQUIRE (crossings (channel (head, 0)) > 15); // sanity: tape still moving early on
+    REQUIRE (crossings (channel (tail, 0)) < 10);
+    REQUIRE (crossings (channel (tail, 1)) < 10);
 }
 
 TEST_CASE ("smoothing: block-rate parameter jumps stay bounded", "[dsp][fx]")
