@@ -55,7 +55,10 @@ struct HeavyHarness
         }
     }
 
-    ~HeavyHarness() { hv_delete (hv); }
+    // hv_OpenGlitch_free, not hv_delete: hv_delete plain-deletes memory that
+    // came from (aligned) hv_malloc + placement new — heap corruption on the
+    // Windows CRT.
+    ~HeavyHarness() { hv_OpenGlitch_free (hv); }
 
     void set (const char* name, float v) { hv_sendFloatToReceiver (hv, hv_stringToHash (name), v); }
 

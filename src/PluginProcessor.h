@@ -120,8 +120,11 @@ private:
     {
         void operator() (HeavyContextInterface* ctx) const noexcept
         {
+            // Not hv_delete: the context is hv_malloc'd (aligned when SIMD is
+            // on) + placement-new'd, but hv_delete plain-deletes it — on the
+            // Windows CRT that free/_aligned_malloc mismatch corrupts the heap.
             if (ctx != nullptr)
-                hv_delete (ctx);
+                hv_OpenGlitch_free (ctx);
         }
     };
 
