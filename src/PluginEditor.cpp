@@ -95,6 +95,9 @@ void OpenGlitchLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, i
 
     juce::Path value;
     value.addCentredArc (centre.x, centre.y, arcR, arcR, 0.0f, rotaryStartAngle, angle, true);
+    g.setColour (fill.withAlpha (0.25f));
+    g.strokePath (value, juce::PathStrokeType (6.5f, juce::PathStrokeType::curved,
+                                               juce::PathStrokeType::rounded));
     g.setColour (fill);
     g.strokePath (value, juce::PathStrokeType (3.0f, juce::PathStrokeType::curved,
                                                juce::PathStrokeType::rounded));
@@ -497,6 +500,11 @@ void SequencerBar::paint (juce::Graphics& g)
     {
         const auto r = slotBounds (slot);
         const bool isActive = slot == activeSlot;
+        if (isActive)
+        {
+            g.setColour (accent.withAlpha (0.35f));
+            g.fillRoundedRectangle (r.expanded (3.0f), 6.0f);
+        }
         g.setColour (isActive ? accent : cellOff);
         g.fillRoundedRectangle (r, 4.0f);
         g.setColour (isActive ? accent.brighter (0.5f) : cellStroke);
@@ -673,6 +681,8 @@ void EffectPanel::paint (juce::Graphics& g)
     auto bounds = getLocalBounds().toFloat();
     g.setColour (panel);
     g.fillRoundedRectangle (bounds, 6.0f);
+    g.setColour (juce::Colours::white.withAlpha (0.05f));
+    g.fillRect (6.0f, 1.0f, bounds.getWidth() - 12.0f, 1.0f);
     g.setColour (glitch::effectColour (currentEffect).withAlpha (0.9f));
     g.fillRoundedRectangle (0.0f, 0.0f, 4.0f, bounds.getHeight(), 2.0f);
     g.setColour (cellStroke);
@@ -682,8 +692,10 @@ void EffectPanel::paint (juce::Graphics& g)
 // ---------------------------------------------------------------------------
 // LfoPanel
 // ---------------------------------------------------------------------------
-LfoPanel::LfoPanel (juce::AudioProcessorValueTreeState& state)
+LfoPanel::LfoPanel (OpenGlitchAudioProcessor& proc)
+    : processor (proc)
 {
+    auto& state = proc.apvts;
     for (int n = 0; n < 2; ++n)
     {
         auto& col = columns[n];
@@ -713,6 +725,35 @@ LfoPanel::LfoPanel (juce::AudioProcessorValueTreeState& state)
         col.depthAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
             state, id ("depth"), col.depth);
     }
+
+    seedLabel.setText ("SEED", juce::dontSendNotification);
+    seedLabel.setFont (juce::Font (juce::FontOptions (10.5f)).boldened());
+    seedLabel.setColour (juce::Label::textColourId, glitch::palette::textDim);
+    addAndMakeVisible (seedLabel);
+    seedSlider.setSliderStyle (juce::Slider::IncDecButtons);
+    seedSlider.setTextBoxStyle (juce::Slider::TextBoxLeft, false, 38, 20);
+    addAndMakeVisible (seedSlider);
+    seedAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        state, "seq_seed", seedSlider);
+
+    for (int t = 0; t < 4; ++t)
+    {
+        templateButtons[t].setButtonText ("T" + juce::String (t + 1));
+        templateButtons[t].onClick = [this, t] { processor.loadTemplate (t); };
+        addAndMakeVisible (templateButtons[t]);
+    }
+
+    startTimerHz (30);
+}
+
+void LfoPanel::timerCallback()
+{
+    repaint (scopeBounds().getSmallestIntegerContainer());
+}
+
+juce::Rectangle<float> LfoPanel::scopeBounds() const
+{
+    return { 8.0f, 134.0f, (float) getWidth() - 16.0f, (float) getHeight() - 134.0f - 34.0f };
 }
 
 void LfoPanel::resized()
@@ -727,6 +768,148 @@ void LfoPanel::resized()
         col.target.setBounds (x, 78, colW, 21);
         col.depth.setBounds (x, 103, colW, 24);
     }
+
+    const int rowY = getHeight() - 28;
+    seedLabel.setBounds (8, rowY, 34, 22);
+    seedSlider.setBounds (42, rowY, 96, 22);
+    for (int t = 0; t < 4; ++t)
+        templateButtons[t].setBounds (getWidth() - 8 - (4 - t) * 34 + 2, rowY, 30, 22);
+}
+
+void LfoPanel::drawScope (juce::Graphics& g, juce::Rectangle<float> r) const
+{
+    using namespace glitch::palette;
+
+    // Phosphor bed with the sequencer's 16-step grid
+    g.setColour (juce::Colour (0xff090b0f));
+    g.fillRoundedRectangle (r, 5.0f);
+    for (int i = 0; i <= 16; ++i)
+    {
+        const float x = r.getX() + r.getWidth() * (float) i / 16.0f;
+        g.setColour (juce::Colours::white.withAlpha (i % 4 == 0 ? 0.10f : 0.035f));
+        g.fillRect (x, r.getY() + 2.0f, 1.0f, r.getHeight() - 4.0f);
+    }
+    g.setColour (juce::Colours::white.withAlpha (0.07f));
+    g.fillRect (r.getX() + 2.0f, r.getCentreY(), r.getWidth() - 4.0f, 1.0f);
+
+    auto rawI = [&] (const juce::String& id)
+    { return (int) std::lround (processor.apvts.getRawParameterValue (id)->load()); };
+    auto rawF = [&] (const juce::String& id)
+    { return processor.apvts.getRawParameterValue (id)->load(); };
+
+    const double barPhase = (double) processor.getBarPhase();
+
+    struct Cfg { int shape, rate, target; double depth, phaseNow, valueNow, cyclesPerBar; };
+    Cfg c[2];
+    for (int n = 0; n < 2; ++n)
+    {
+        const auto p = "lfo" + juce::String (n + 1) + "_";
+        c[n] = { rawI (p + "shape"), rawI (p + "rate"), rawI (p + "target"),
+                 (double) rawF (p + "depth"), (double) processor.getLfoPhase (n),
+                 (double) processor.getLfoValue (n), 0.0 };
+        c[n].cyclesPerBar = 16.0 / lfo::stepsPerCycle (c[n].rate);
+    }
+
+    // Evaluate both traces across one bar. LFO 2 is closed-form; LFO 1 is
+    // integrated so LFO 2's rate-FM warping shows exactly as it sounds.
+    constexpr int N = 96;
+    float v1[N + 1], v2[N + 1];
+    for (int k = 0; k <= N; ++k)
+    {
+        const double x = (double) k / N;
+        if (c[1].shape == lfo::random)
+        {
+            v2[k] = (float) c[1].valueNow;
+            continue;
+        }
+        double ph = c[1].phaseNow + (x - barPhase) * c[1].cyclesPerBar;
+        ph -= std::floor (ph);
+        v2[k] = (float) (lfo::shapeValue (c[1].shape, ph, 0.0) * c[1].depth);
+    }
+    {
+        double integral[N + 1];
+        integral[0] = 0.0;
+        for (int k = 1; k <= N; ++k)
+        {
+            const double rateFactor = c[1].target == lfo::lfo1Rate ? std::exp2 (2.0 * v2[k - 1]) : 1.0;
+            integral[k] = integral[k - 1] + rateFactor * c[0].cyclesPerBar / N;
+        }
+        const double cursorIndex = juce::jlimit (0.0, (double) N, barPhase * N);
+        const int ci = (int) cursorIndex;
+        const double cursorIntegral = integral[ci]
+            + (ci < N ? (integral[ci + 1] - integral[ci]) * (cursorIndex - ci) : 0.0);
+        for (int k = 0; k <= N; ++k)
+        {
+            if (c[0].shape == lfo::random)
+            {
+                v1[k] = (float) c[0].valueNow;
+                continue;
+            }
+            const double depthEff = c[1].target == lfo::lfo1Depth
+                ? juce::jlimit (0.0, 1.0, c[0].depth * (1.0 + v2[k]))
+                : c[0].depth;
+            double ph = c[0].phaseNow + integral[k] - cursorIntegral;
+            ph -= std::floor (ph);
+            v1[k] = (float) (lfo::shapeValue (c[0].shape, ph, 0.0) * depthEff);
+        }
+    }
+
+    auto toY = [&] (float v) { return r.getCentreY() - v * (r.getHeight() * 0.42f); };
+    auto drawTrace = [&] (const float* vals, juce::Colour colour, bool dimmed)
+    {
+        juce::Path path;
+        path.startNewSubPath (r.getX() + 1.0f, toY (vals[0]));
+        for (int k = 1; k <= N; ++k)
+            path.lineTo (r.getX() + 1.0f + (r.getWidth() - 2.0f) * (float) k / N, toY (vals[k]));
+
+        const float a = dimmed ? 0.30f : 1.0f;
+        juce::Path fill (path);
+        fill.lineTo (r.getRight() - 1.0f, r.getCentreY());
+        fill.lineTo (r.getX() + 1.0f, r.getCentreY());
+        fill.closeSubPath();
+        g.setColour (colour.withAlpha (0.08f * a));
+        g.fillPath (fill);
+
+        using PST = juce::PathStrokeType;
+        g.setColour (colour.withAlpha (0.10f * a));
+        g.strokePath (path, PST (7.0f, PST::curved, PST::rounded));
+        g.setColour (colour.withAlpha (0.30f * a));
+        g.strokePath (path, PST (3.2f, PST::curved, PST::rounded));
+        g.setColour (colour.withAlpha (0.95f * a));
+        g.strokePath (path, PST (1.5f, PST::curved, PST::rounded));
+    };
+
+    const auto magenta = juce::Colour (0xffe040fb);
+    const auto cyan = juce::Colour (0xff4fc3f7);
+    drawTrace (v2, cyan, c[1].target == lfo::off || c[1].depth < 0.001);
+    drawTrace (v1, magenta, c[0].target == lfo::off || c[0].depth < 0.001);
+
+    // Beam cursor with glowing crossing dots
+    const float cx = r.getX() + 1.0f + (r.getWidth() - 2.0f) * (float) barPhase;
+    g.setColour (lamp.withAlpha (0.12f));
+    g.fillRect (cx - 3.0f, r.getY() + 2.0f, 6.0f, r.getHeight() - 4.0f);
+    g.setColour (lamp.withAlpha (0.75f));
+    g.fillRect (cx - 0.5f, r.getY() + 2.0f, 1.0f, r.getHeight() - 4.0f);
+    for (int n = 0; n < 2; ++n)
+    {
+        const auto colour = n == 0 ? magenta : cyan;
+        const float y = toY ((float) c[n].valueNow);
+        g.setColour (colour.withAlpha (0.30f));
+        g.fillEllipse (cx - 5.0f, y - 5.0f, 10.0f, 10.0f);
+        g.setColour (colour);
+        g.fillEllipse (cx - 2.2f, y - 2.2f, 4.4f, 4.4f);
+    }
+
+    // Routing labels
+    static const char* const targetNames[] = { "OFF", "FILTER", "DRIVE", "CHAOS", "MOD",
+                                               "PITCH", "DUTY", "L1 RATE", "L1 DEPTH" };
+    g.setFont (juce::Font (juce::FontOptions (9.5f)).boldened());
+    g.setColour (magenta.withAlpha (0.75f));
+    g.drawText (juce::String ("1 > ") + targetNames[juce::jlimit (0, 8, c[0].target)],
+                (int) r.getX() + 6, (int) r.getY() + 3, 84, 11, juce::Justification::centredLeft);
+    g.setColour (cyan.withAlpha (0.75f));
+    g.drawText (juce::String ("2 > ") + targetNames[juce::jlimit (0, 8, c[1].target)],
+                (int) r.getRight() - 90, (int) r.getY() + 3, 84, 11, juce::Justification::centredRight);
 }
 
 void LfoPanel::paint (juce::Graphics& g)
@@ -735,6 +918,8 @@ void LfoPanel::paint (juce::Graphics& g)
     auto bounds = getLocalBounds().toFloat();
     g.setColour (panel);
     g.fillRoundedRectangle (bounds, 6.0f);
+    g.setColour (juce::Colours::white.withAlpha (0.05f));
+    g.fillRect (6.0f, 1.0f, bounds.getWidth() - 12.0f, 1.0f);
     g.setColour (cellStroke);
     g.drawRoundedRectangle (bounds.reduced (0.5f), 6.0f, 1.0f);
 
@@ -745,6 +930,13 @@ void LfoPanel::paint (juce::Graphics& g)
     g.setColour (juce::Colour (0xff4fc3f7));
     g.drawText (juce::String::fromUTF8 ("LFO 2 \xe2\x80\x94 can drive LFO 1"),
                 16 + colW, 6, colW + 60, 18, juce::Justification::centredLeft);
+
+    g.setFont (juce::Font (juce::FontOptions (10.5f)).boldened());
+    g.setColour (glitch::palette::textDim);
+    g.drawText ("TPL", getWidth() - 8 - 4 * 34 - 30, getHeight() - 28, 26, 22,
+                juce::Justification::centredRight);
+
+    drawScope (g, scopeBounds());
 }
 
 // ---------------------------------------------------------------------------
@@ -839,6 +1031,8 @@ void MasterPanel::paint (juce::Graphics& g)
     auto bounds = getLocalBounds().toFloat();
     g.setColour (panel);
     g.fillRoundedRectangle (bounds, 6.0f);
+    g.setColour (juce::Colours::white.withAlpha (0.05f));
+    g.fillRect (6.0f, 1.0f, bounds.getWidth() - 12.0f, 1.0f);
     g.setColour (cellStroke);
     g.drawRoundedRectangle (bounds.reduced (0.5f), 6.0f, 1.0f);
     g.setColour (textDim);
@@ -855,7 +1049,7 @@ OpenGlitchAudioProcessorEditor::OpenGlitchAudioProcessorEditor (OpenGlitchAudioP
       matrix (p.apvts),
       sequencerBar (p),
       effectPanel (p.apvts),
-      lfoPanel (p.apvts),
+      lfoPanel (p),
       masterPanel (p.apvts)
 {
     setLookAndFeel (&lookAndFeel);
@@ -924,7 +1118,10 @@ void OpenGlitchAudioProcessorEditor::timerCallback()
 void OpenGlitchAudioProcessorEditor::paint (juce::Graphics& g)
 {
     using namespace glitch::palette;
-    g.fillAll (bg);
+    juce::ColourGradient chassis (juce::Colour (0xff1c2027), 0.0f, 0.0f,
+                                  juce::Colour (0xff111318), 0.0f, (float) getHeight(), false);
+    g.setGradientFill (chassis);
+    g.fillAll();
 
     const auto titleFont = juce::Font (juce::FontOptions (27.0f)).boldened();
     juce::GlyphArrangement measure;

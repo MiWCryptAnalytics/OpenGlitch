@@ -50,6 +50,13 @@ Feature complete for 1.0:
   (bp~ peak layered on the cutoff) and Filter Mix.
 - **16 pattern banks** (MIDI notes C1-D#2 / 36-51 switch them live) and
   **pattern Shift arrows** (< > rotate the grid within its length).
+- **Templates** — four factory patterns (stutter, buildup, halftime
+  wreck, ambient smear) on T1-T4 buttons, and the **Seed** control now has
+  a UI. With these, every feature of the original dblue Glitch 1.3 panel
+  is implemented.
+- **Modulation scope** — a live phosphor-style display of both LFOs over
+  the bar, computed from the real coupled math: when LFO 2 drives LFO 1's
+  rate you watch the trace warp exactly as it sounds.
 - **Two tempo-synced LFOs** (sine/tri/saw/square/S&H random, 1/16 to 4 bars,
   ppq-locked to the DAW bar). Targets: filter freq, drive, chaos, mod freq,
   retrigger pitch, gate duty — and LFO 2 can instead drive **LFO 1's rate or

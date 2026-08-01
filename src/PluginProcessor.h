@@ -64,6 +64,13 @@ public:
     void randomizeActivePattern();       // message thread only (the DICE button)
     void randomizeFxKnobs();             // message thread only (the FX dice button)
     void shiftActivePattern (int direction); // message thread only (< > arrows)
+    void loadTemplate (int templateIndex);   // message thread only (template buttons)
+
+    // Live modulation state for the scope: phases/values of both LFOs and
+    // the current position within the bar (0..1).
+    float getLfoPhase (int lfoIndex) const noexcept { return lfoPhaseA[lfoIndex].load (std::memory_order_relaxed); }
+    float getLfoValue (int lfoIndex) const noexcept { return lfoValueA[lfoIndex].load (std::memory_order_relaxed); }
+    float getBarPhase() const noexcept { return diagBarPhase.load (std::memory_order_relaxed); }
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
@@ -155,6 +162,9 @@ private:
     std::atomic<int> diagTransport { transportUnknown };
     std::atomic<juce::uint32> diagTickCount { 0 };
     std::atomic<float> diagWet { 0.0f };
+    std::atomic<float> diagBarPhase { 0.0f };
+    std::atomic<float> lfoPhaseA[2] { 0.0f, 0.0f };
+    std::atomic<float> lfoValueA[2] { 0.0f, 0.0f };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (OpenGlitchAudioProcessor)
 };

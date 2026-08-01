@@ -148,17 +148,25 @@ private:
     int currentEffect = 3;
 };
 
-// Two tempo-synced LFOs. LFO 2's target list includes LFO 1's rate and depth
-// for cascaded, derivative modulation.
-class LfoPanel : public juce::Component
+// Two tempo-synced LFOs with a live modulation scope. LFO 2's target list
+// includes LFO 1's rate and depth for cascaded, derivative modulation — and
+// the scope integrates the real coupled math, so the warping is visible.
+// Below the scope: the Seed control and the four factory template buttons.
+class LfoPanel : public juce::Component,
+                 private juce::Timer
 {
 public:
-    explicit LfoPanel (juce::AudioProcessorValueTreeState& state);
+    explicit LfoPanel (OpenGlitchAudioProcessor& proc);
 
     void paint (juce::Graphics&) override;
     void resized() override;
 
 private:
+    void timerCallback() override;
+    juce::Rectangle<float> scopeBounds() const;
+    void drawScope (juce::Graphics&, juce::Rectangle<float>) const;
+
+    OpenGlitchAudioProcessor& processor;
     struct Column
     {
         juce::ComboBox shape, rate, target;
@@ -168,6 +176,10 @@ private:
         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> depthAtt;
     };
     Column columns[2];
+    juce::Label seedLabel;
+    juce::Slider seedSlider;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> seedAttachment;
+    juce::TextButton templateButtons[4];
 };
 
 // Right-hand strip: chaos + master chain, and the bypass switch.

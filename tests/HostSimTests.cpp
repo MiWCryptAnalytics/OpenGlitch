@@ -573,3 +573,20 @@ TEST_CASE ("matrix gestures: paint, span-drag, stretch, toggle, erase", "[host][
     matrix.handleErase (2);
     REQUIRE (step (3) == 0);
 }
+
+TEST_CASE ("host: templates load factory patterns into the active slot", "[host][pattern]")
+{
+    Harness h;
+    auto step = [&] (int i)
+    {
+        return (int) std::lround (h.proc.apvts.getRawParameterValue ("step_" + juce::String (i))->load());
+    };
+    h.proc.loadTemplate (2); // halftime wreck
+    REQUIRE (step (1) == 9);
+    REQUIRE (step (2) == 10);
+    REQUIRE (step (5) == 1);
+    REQUIRE (step (13) == 5);
+    h.proc.loadTemplate (0); // stutter
+    REQUIRE (step (1) == 3);
+    REQUIRE (step (14) == 10);
+}

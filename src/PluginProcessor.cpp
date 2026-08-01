@@ -356,6 +356,28 @@ void OpenGlitchAudioProcessor::randomizeFxKnobs()
     }
 }
 
+void OpenGlitchAudioProcessor::loadTemplate (int templateIndex)
+{
+    // Factory patterns in the spirit of the original's Templates row.
+    static const int templates[4][16] = {
+        { 3, 0, 0, 0, 3, 0, 3, 10, 3, 0, 0, 3, 3, 10, 10, 10 },  // stutter
+        { 7, 0, 7, 0, 3, 10, 3, 10, 3, 3, 3, 3, 9, 10, 1, 10 },  // buildup
+        { 9, 10, 10, 10, 1, 10, 0, 0, 9, 10, 10, 10, 5, 10, 6, 0 }, // halftime wreck
+        { 2, 10, 10, 10, 8, 10, 10, 10, 5, 10, 10, 10, 9, 10, 10, 10 }, // ambient smear
+    };
+    if (templateIndex < 0 || templateIndex > 3)
+        return;
+
+    const juce::ScopedValueSetter<bool> loading (loadingPattern, true);
+    for (int i = 0; i < 16; ++i)
+    {
+        auto* p = stepParams[(size_t) i];
+        p->setValueNotifyingHost (p->convertTo0to1 ((float) templates[templateIndex][i]));
+    }
+    lengthParam->setValueNotifyingHost (lengthParam->convertTo0to1 (16.0f));
+    storePattern (activeSlot);
+}
+
 void OpenGlitchAudioProcessor::shiftActivePattern (int direction)
 {
     const int length = juce::jlimit (1, 16, (int) std::lround (lengthRaw->load()));
@@ -570,6 +592,11 @@ void OpenGlitchAudioProcessor::updateLfos (int numSamples)
     const int target1 = intOf (lfoRaw[0][3]);
     if (target1 > lfo::off && target1 < lfo::lfo1Rate)
         modContrib[target1] += (float) v1;
+
+    lfoPhaseA[0].store ((float) lfoStates[0].phase, std::memory_order_relaxed);
+    lfoPhaseA[1].store ((float) lfoStates[1].phase, std::memory_order_relaxed);
+    lfoValueA[0].store ((float) v1, std::memory_order_relaxed);
+    lfoValueA[1].store ((float) v2, std::memory_order_relaxed);
 }
 
 void OpenGlitchAudioProcessor::pushPostParameters()
@@ -657,6 +684,12 @@ void OpenGlitchAudioProcessor::pushTransport (int numSamples)
         ppq = standalonePpq;
         if (const double sr = getSampleRate(); sr > 0.0)
             standalonePpq += (double) numSamples * bpm / (60.0 * sr);
+    }
+
+    {
+        const double barPosition = ppq * 0.25;
+        diagBarPhase.store ((float) (barPosition - std::floor (barPosition)),
+                            std::memory_order_relaxed);
     }
 
     if (hostSyncActive != 0)

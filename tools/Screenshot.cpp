@@ -12,6 +12,22 @@ int main (int argc, char** argv)
 
     // Run some audio through the free-running sequencer so the snapshot
     // shows the playhead, lamp and LCD in their live state.
+    // Dial in a photogenic LFO cascade for the scope: LFO1 sine -> filter,
+    // LFO2 triangle -> LFO1 rate (the warp becomes visible in the trace).
+    auto setParam = [&processor] (const char* id, float value)
+    {
+        auto* p = processor.apvts.getParameter (id);
+        p->setValueNotifyingHost (p->convertTo0to1 (value));
+    };
+    setParam ("lfo1_shape", 0.0f);
+    setParam ("lfo1_rate", 4.0f);
+    setParam ("lfo1_depth", 0.85f);
+    setParam ("lfo1_target", 1.0f);
+    setParam ("lfo2_shape", 1.0f);
+    setParam ("lfo2_rate", 5.0f);
+    setParam ("lfo2_depth", 0.6f);
+    setParam ("lfo2_target", 7.0f);
+
     processor.setPlayConfigDetails (2, 2, 48000.0, 512);
     processor.prepareToPlay (48000.0, 512);
     juce::AudioBuffer<float> audio (2, 512);
