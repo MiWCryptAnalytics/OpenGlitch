@@ -273,14 +273,18 @@ void StepMatrix::mouseDrag (const juce::MouseEvent& e)
         return;
 
     // Dragging rightwards along the same row extends the block as a span
-    // (Tie steps), like stretching a block in the original Glitch. Changing
-    // row or jumping columns starts a fresh trigger.
-    int value = eraseGesture ? 0 : row + 1;
-    if (! eraseGesture && row == lastPaintRow && col == lastPaintCol + 1
+    // (Tie steps), like stretching a block in the original Glitch. A fast
+    // drag can skip columns, so every column passed over is filled in.
+    if (! eraseGesture && row == lastPaintRow && col > lastPaintCol
         && steps[(size_t) lastPaintCol] != 0)
-        value = 10;
-
-    setStep (col, value);
+    {
+        for (int c = lastPaintCol + 1; c <= col; ++c)
+            setStep (c, 10);
+    }
+    else
+    {
+        setStep (col, eraseGesture ? 0 : row + 1);
+    }
     lastPaintCol = col;
     lastPaintRow = row;
 }
