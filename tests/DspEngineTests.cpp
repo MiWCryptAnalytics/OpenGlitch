@@ -189,3 +189,34 @@ TEST_CASE ("master filter: three modes shape the wet path", "[dsp][filter]")
     REQUIRE (filteredRms (2.0f, 8000.0f) < ref * 0.2f);   // BP@8k rejects 220
     REQUIRE (filteredRms (2.0f, 220.0f) > ref * 0.4f);    // BP@220 passes 220
 }
+
+TEST_CASE ("tie: a spanned effect differs from re-triggered and dry", "[dsp][span]")
+{
+    auto runPattern = [] (float step1, float step2, int span1)
+    {
+        HeavyHarness h;
+        h.set ("host_playing", 0.0f);
+        h.setAllSteps (0.0f);
+        h.set ("step_1", step1);
+        h.set ("step_2", step2);
+        h.run (0.1);
+        std::vector<float> out;
+        for (int bar = 0; bar < 2; ++bar)
+            for (int s = 0; s < 16; ++s)
+            {
+                h.set ("glitch_spansteps", (float) (s == 0 ? span1 : 1));
+                h.tick (s);
+                auto o = h.run (0.125);
+                out.insert (out.end(), o.begin(), o.end());
+            }
+        return out;
+    };
+
+    auto spanned = runPattern (1.0f, 10.0f, 2);    // tapestop tied across 2 steps
+    auto retriggered = runPattern (1.0f, 1.0f, 1); // two separate 1-step tapestops
+    auto dry = runPattern (0.0f, 0.0f, 1);
+
+    REQUIRE (maxDiff (spanned, dry) > 0.05f);        // span audibly glitches
+    REQUIRE (maxDiff (retriggered, dry) > 0.05f);
+    REQUIRE (maxDiff (spanned, retriggered) > 0.02f); // and differs from re-triggering
+}

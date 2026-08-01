@@ -429,3 +429,23 @@ TEST_CASE ("host: LFO on the filter audibly animates a dry grid", "[host][lfo]")
     REQUIRE (allFinite (out));
     REQUIRE (maxDiff (out, ref) > 0.05f);
 }
+
+TEST_CASE ("host: tie spans run an effect across beats", "[host][span]")
+{
+    auto runGrid = [] (std::initializer_list<std::pair<int, float>> cells)
+    {
+        Harness h;
+        h.playhead.playing = true;
+        h.setAllSteps (0.0f);
+        for (const auto& [step, v] : cells)
+            h.setParam ("step_" + juce::String (step), v);
+        h.run (0.1);
+        return h.run (2.0);
+    };
+
+    auto dry = runGrid ({});
+    auto spanned = runGrid ({ { 1, 1.0f }, { 2, 10.0f }, { 3, 10.0f }, { 4, 10.0f } });
+    auto single = runGrid ({ { 1, 1.0f } });
+    REQUIRE (maxDiff (spanned, dry) > 0.05f);
+    REQUIRE (maxDiff (spanned, single) > 0.02f);
+}

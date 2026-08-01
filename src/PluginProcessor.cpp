@@ -55,10 +55,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout OpenGlitchAudioProcessor::cr
 {
     juce::AudioProcessorValueTreeState::ParameterLayout layout;
 
+    // Index 10 ("Tie") continues the previous step's effect, so an effect can
+    // span multiple steps like the original Glitch's stretched blocks.
     const juce::StringArray effectNames { "Dry", "Tape Stop", "Modulator", "Retrigger", "Shuffler",
-                                          "Reverser", "Crusher", "Gater", "Delay", "Stretcher" };
+                                          "Reverser", "Crusher", "Gater", "Delay", "Stretcher",
+                                          "Tie" };
     // The demo pattern from the Pd patch defaults.
-    const int stepDefaults[16] = { 0, 0, 3, 0, 7, 0, 3, 5, 0, 6, 0, 4, 3, 0, 9, 1 };
+    const int stepDefaults[16] = { 0, 0, 3, 0, 7, 0, 3, 10, 0, 6, 0, 4, 3, 0, 9, 1 };
 
     auto sequencer = std::make_unique<juce::AudioProcessorParameterGroup> ("sequencer", "Sequencer", "|");
     for (int i = 0; i < 16; ++i)
@@ -261,11 +264,16 @@ void OpenGlitchAudioProcessor::randomizeActivePattern()
 {
     auto& rng = juce::Random::getSystemRandom();
     const juce::ScopedValueSetter<bool> loading (loadingPattern, true);
+    int previous = 0;
     for (auto* p : stepParams)
     {
-        // ~45% rests keep it musical; the rest is any of the nine effects.
-        const int effect = rng.nextFloat() < 0.45f ? 0 : rng.nextInt ({ 1, 10 });
+        // ~45% rests keep it musical; the rest is any of the nine effects,
+        // sometimes tied into a longer span like the original's wide blocks.
+        int effect = rng.nextFloat() < 0.45f ? 0 : rng.nextInt ({ 1, 10 });
+        if (previous != 0 && effect != 0 && rng.nextFloat() < 0.3f)
+            effect = 10;
         p->setValueNotifyingHost (p->convertTo0to1 ((float) effect));
+        previous = effect;
     }
     storePattern (activeSlot);
 }
@@ -339,6 +347,7 @@ void OpenGlitchAudioProcessor::prepareToPlay (double sampleRate, int samplesPerB
         link.lastSent = std::numeric_limits<float>::quiet_NaN();
 
     hostSyncActive = -1;
+    standalonePpq = 0.0;
     lastSentBpm = 0.0;
     wasPlaying = false;
     lastFiredTick = std::numeric_limits<long long>::min();
@@ -510,15 +519,21 @@ void OpenGlitchAudioProcessor::pushTransport (int numSamples)
     diagTransport.store (hosted ? (playing ? hostedPlaying : hostedStopped) : standaloneClock,
                          std::memory_order_relaxed);
 
-    // With a DAW timeline available, JUCE becomes the clock: the standalone
-    // metro is switched off and 16th-note ticks are scheduled below.
-    const int wantHostSync = hosted ? 1 : 0;
-    if (wantHostSync != hostSyncActive)
+    // JUCE is the only clock: without a host timeline a virtual one free-runs,
+    // so spans/swing/chaos behave identically hosted and standalone.
+    if (! hosted)
+    {
+        playing = true;
+        ppq = standalonePpq;
+        if (const double sr = getSampleRate(); sr > 0.0)
+            standalonePpq += (double) numSamples * bpm / (60.0 * sr);
+    }
+
+    if (hostSyncActive != 0)
     {
         // Only latch on success: a full queue means a retry next block.
-        if (hv_sendFloatToReceiver (heavy.get(), HV_OPENGLITCH_PARAM_IN_HOST_PLAYING,
-                                    hosted ? 0.0f : 1.0f))
-            hostSyncActive = wantHostSync;
+        if (hv_sendFloatToReceiver (heavy.get(), HV_OPENGLITCH_PARAM_IN_HOST_PLAYING, 0.0f))
+            hostSyncActive = 0;
     }
 
     displayBpm.store ((float) bpm, std::memory_order_relaxed);
@@ -529,9 +544,6 @@ void OpenGlitchAudioProcessor::pushTransport (int numSamples)
         if (hv_sendFloatToReceiver (heavy.get(), HV_OPENGLITCH_PARAM_IN_HOST_BPM, (float) bpm))
             lastSentBpm = bpm;
     }
-
-    if (! hosted)
-        return;
 
     if (playing)
     {
@@ -545,21 +557,35 @@ void OpenGlitchAudioProcessor::pushTransport (int numSamples)
         auto stepOf = [length] (long long g) { return (int) (((g % length) + length) % length); };
         auto swingOf = [swingMs] (long long g) { return (g & 1) != 0 ? swingMs : 0.0; };
 
+        // Span length at a step: 1 + the run of "Tie" (10) steps following it.
+        auto spanAt = [this, length] (int step)
+        {
+            int n = 1;
+            while (step + n < (int) length
+                   && (int) std::lround (paramLinks[(size_t) (step + n)].value->load()) == 10)
+                ++n;
+            return n;
+        };
+        static const hv_uint32_t spanHash = hv_stringToHash ("glitch_spansteps");
+        auto sendSpanAndTick = [&] (long long g, double delayMs)
+        {
+            const int step = stepOf (g);
+            // Scheduled at the same offset as its tick so paired values stay
+            // coherent even with several ticks inside one block.
+            hv_sendMessageToReceiverV (heavy.get(), spanHash, delayMs, "f", (double) spanAt (step));
+            sendTick (step, delayMs);
+            lastFiredTick = g;
+        };
+
         // Fire the current 16th immediately after any discontinuity
         // (transport start, relocate, loop wrap), then schedule every
         // boundary inside this block at its exact offset (odd 16ths are
         // pushed late by the swing amount).
         const auto g0 = (long long) std::floor (ppq * 4.0);
         if (g0 != lastFiredTick)
-        {
-            sendTick (stepOf (g0), swingOf (g0));
-            lastFiredTick = g0;
-        }
+            sendSpanAndTick (g0, swingOf (g0));
         for (long long g = g0 + 1; (double) g / 4.0 < ppqEnd; ++g)
-        {
-            sendTick (stepOf (g), ((double) g / 4.0 - ppq) * 60000.0 / bpm + swingOf (g));
-            lastFiredTick = g;
-        }
+            sendSpanAndTick (g, ((double) g / 4.0 - ppq) * 60000.0 / bpm + swingOf (g));
     }
     else if (wasPlaying)
     {

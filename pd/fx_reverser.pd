@@ -1,7 +1,7 @@
 #N canvas 60 60 600 520 12;
 #X text 20 10 fx 5 Reverser: read delay ramps 0 to 2T over the step (slope 2) so playback runs backwards at normal speed through the audio just before the step.;
 #X obj 20 70 r glitch_stepbang;
-#X obj 220 70 r glitch_stepdur;
+#X obj 220 70 r glitch_spandur;
 #X obj 220 100 f;
 #X obj 220 130 t f f;
 #X obj 220 160 * 2;

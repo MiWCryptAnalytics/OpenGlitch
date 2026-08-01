@@ -2,7 +2,7 @@
 #X text 20 10 fx 1 TapeStop: read delay grows as e^2/(2*T*speed) so playback speed falls linearly to zero. speed<1 stops early then reverse-sucks the tape \; speed>1 never quite stops.;
 #X obj 20 70 r glitch_stepbang;
 #X obj 20 100 t b b;
-#X obj 240 70 r glitch_stepdur;
+#X obj 240 70 r glitch_spandur;
 #X obj 240 100 f;
 #X obj 440 70 r fx_tapestop_speed @hv_param 0.1 4 1;
 #X obj 440 100 f;

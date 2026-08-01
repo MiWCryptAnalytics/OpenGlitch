@@ -2,7 +2,7 @@
 #X text 20 10 fx 9 Stretcher: tape-style slowdown. Read delay = e*(1-speed) so the step plays at 'speed' rate (0.5 = half speed \, one octave down) \, drifting behind real time.;
 #X obj 20 70 r glitch_stepbang;
 #X obj 20 100 t b b;
-#X obj 220 70 r glitch_stepdur;
+#X obj 220 70 r glitch_spandur;
 #X obj 220 100 f;
 #X obj 430 70 r fx_stretch_speed @hv_param 0.1 1 0.5;
 #X obj 430 100 f;

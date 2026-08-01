@@ -70,6 +70,7 @@ private:
     int patternLength = 16;
     int playheadColumn = -1;
     bool eraseGesture = false;
+    int lastPaintCol = -1, lastPaintRow = -1; // for drag-to-span gestures
 };
 
 // Strip below the matrix: pattern slots A..H (click to switch, shift-click to

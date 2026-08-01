@@ -128,8 +128,9 @@ private:
     float* scratch[4] = {}; // inL, inR, outL, outR
     int scratchCapacity = 0;
 
-    // Transport state. hostSyncActive: -1 unknown, 0 standalone metro, 1 DAW-driven.
+    // Transport state. hostSyncActive: -1 unknown, 0 = JUCE-driven (always).
     int hostSyncActive = -1;
+    double standalonePpq = 0.0; // virtual timeline when no host provides one
     double lastSentBpm = 0.0;
     bool wasPlaying = false;
     long long lastFiredTick = std::numeric_limits<long long>::min();

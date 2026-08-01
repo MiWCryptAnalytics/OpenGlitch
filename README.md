@@ -23,8 +23,16 @@ Feature complete for 1.0:
 - **Swing** (0–100%) — sample-accurately scheduled in hosted mode, delayed
   odd-step firing in the standalone clock.
 - **Mono tracks supported** (mono in is duplicated, mono out averaged).
+- **Effect spans (Tie)** — drag across a row to stretch one effect over
+  multiple steps, like the original's wide blocks. Tied steps don't
+  re-trigger: a tape stop winds down across the whole span, a retrigger
+  keeps looping its first slice, a reverser reverses the full length.
+  Step parameters gained an 11th choice ("Tie") for this.
+- **One clock** — JUCE drives the sequencer everywhere now; without a host
+  timeline a virtual one free-runs, so swing, chaos and spans behave
+  identically in DAWs and standalone.
 - **DICE** — one click fills the active pattern with a random (musically
-  weighted) grid; CLEAR empties it.
+  weighted) grid, occasionally tying steps into spans; CLEAR empties it.
 - **Multimode master filter** — Lowpass / Highpass / Bandpass selector under
   the master faders (bandpass is a hip~/lop~ series pair).
 - **Tempo-synced ring modulator** — a SYNC selector on the Modulator panel

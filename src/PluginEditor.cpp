@@ -258,6 +258,8 @@ void StepMatrix::mouseDown (const juce::MouseEvent& e)
 
     eraseGesture = (steps[(size_t) col] == row + 1);
     setStep (col, eraseGesture ? 0 : row + 1);
+    lastPaintCol = col;
+    lastPaintRow = row;
     if (onEffectTouched)
         onEffectTouched (row + 1);
 }
@@ -267,8 +269,20 @@ void StepMatrix::mouseDrag (const juce::MouseEvent& e)
     if (e.mods.isPopupMenu())
         return;
     int col = 0, row = 0;
-    if (locateCell (e.position, col, row))
-        setStep (col, eraseGesture ? 0 : row + 1);
+    if (! locateCell (e.position, col, row))
+        return;
+
+    // Dragging rightwards along the same row extends the block as a span
+    // (Tie steps), like stretching a block in the original Glitch. Changing
+    // row or jumping columns starts a fresh trigger.
+    int value = eraseGesture ? 0 : row + 1;
+    if (! eraseGesture && row == lastPaintRow && col == lastPaintCol + 1
+        && steps[(size_t) lastPaintCol] != 0)
+        value = 10;
+
+    setStep (col, value);
+    lastPaintCol = col;
+    lastPaintRow = row;
 }
 
 void StepMatrix::paint (juce::Graphics& g)
@@ -309,39 +323,57 @@ void StepMatrix::paint (juce::Graphics& g)
                     juce::Rectangle<float> (20.0f, ry, (float) labelWidth - 28.0f, rh),
                     juce::Justification::centredLeft);
 
+        // Pass 1: background cells (spans are drawn on top afterwards).
         for (int c = 0; c < 16; ++c)
         {
             auto cell = juce::Rectangle<float> (columnX (c), ry, cw, rh).reduced (2.0f);
-            const bool active = steps[(size_t) c] == r + 1;
             const bool onPlayhead = c == playheadColumn;
+
+            // Alternate the 4-step beat groups so the bar stays readable.
+            auto base = ((c / 4) % 2 == 1) ? cellOff.brighter (0.13f) : cellOff;
+            if (c >= patternLength)
+                base = base.darker (0.5f);
+            g.setColour (onPlayhead ? base.brighter (0.25f) : base);
+            g.fillRoundedRectangle (cell, 3.5f);
+            g.setColour (cellStroke);
+            g.drawRoundedRectangle (cell, 3.5f, 1.0f);
+        }
+
+        // Pass 2: active blocks. A run of Tie steps (value 10) after a
+        // trigger renders as one elongated block, like the original Glitch.
+        for (int c = 0; c < 16; ++c)
+        {
+            if (steps[(size_t) c] != r + 1)
+                continue;
+            int end = c;
+            while (end + 1 < 16 && steps[(size_t) (end + 1)] == 10)
+                ++end;
+
+            auto block = juce::Rectangle<float> (columnX (c), ry,
+                                                 columnX (end) + cw - columnX (c), rh)
+                             .reduced (2.0f);
+            const bool onPlayhead = playheadColumn >= c && playheadColumn <= end;
             const bool beyondLength = c >= patternLength;
 
-            if (active)
+            if (onPlayhead)
             {
-                if (onPlayhead)
-                {
-                    g.setColour (colour.withAlpha (0.45f));
-                    g.fillRoundedRectangle (cell.expanded (3.0f), 5.0f);
-                }
-                auto fill = onPlayhead ? colour.brighter (0.35f) : colour.withAlpha (0.88f);
-                if (beyondLength)
-                    fill = fill.withMultipliedAlpha (0.25f);
-                g.setColour (fill);
-                g.fillRoundedRectangle (cell, 3.5f);
-                g.setColour (colour.brighter (0.6f).withMultipliedAlpha (beyondLength ? 0.25f : 1.0f));
-                g.drawRoundedRectangle (cell, 3.5f, 1.2f);
+                g.setColour (colour.withAlpha (0.45f));
+                g.fillRoundedRectangle (block.expanded (3.0f), 5.0f);
             }
-            else
-            {
-                // Alternate the 4-step beat groups so the bar stays readable.
-                auto base = ((c / 4) % 2 == 1) ? cellOff.brighter (0.13f) : cellOff;
-                if (beyondLength)
-                    base = base.darker (0.5f);
-                g.setColour (onPlayhead ? base.brighter (0.25f) : base);
-                g.fillRoundedRectangle (cell, 3.5f);
-                g.setColour (cellStroke);
-                g.drawRoundedRectangle (cell, 3.5f, 1.0f);
-            }
+            auto fill = onPlayhead ? colour.brighter (0.35f) : colour.withAlpha (0.88f);
+            if (beyondLength)
+                fill = fill.withMultipliedAlpha (0.25f);
+            g.setColour (fill);
+            g.fillRoundedRectangle (block, 3.5f);
+            g.setColour (colour.brighter (0.6f).withMultipliedAlpha (beyondLength ? 0.25f : 1.0f));
+            g.drawRoundedRectangle (block, 3.5f, 1.2f);
+
+            // Tick marks at internal step boundaries keep the grid readable.
+            g.setColour (colour.darker (0.6f).withAlpha (0.6f));
+            for (int t = c + 1; t <= end; ++t)
+                g.fillRect (columnX (t) - 1.0f, ry + rh * 0.28f, 1.5f, rh * 0.44f);
+
+            c = end;
         }
     }
 
