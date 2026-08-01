@@ -532,6 +532,9 @@ void OpenGlitchAudioProcessor::pushTransport (int numSamples)
     if (playing)
     {
         const double sr = getSampleRate();
+        if (sr <= 0.0 || bpm <= 0.0)
+            return; // a hostless/misconfigured caller must not unbound the tick loop
+
         const double ppqEnd = ppq + (double) numSamples * bpm / (60.0 * sr);
         const auto length = (long long) juce::jlimit (1, 16, (int) std::lround (lengthRaw->load()));
         const double swingMs = (double) swingRaw->load() * 15000.0 / bpm; // fraction of a 16th

@@ -161,4 +161,43 @@ if(OPENGLITCH_BUILD_TOOLS)
         juce::juce_audio_utils
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)
+
+endif()
+
+# ---------------------------------------------------------------------------
+# Test suite (Catch2 + CTest). Every TEST_CASE becomes its own CTest entry
+# running in a separate process with a timeout, so a hang fails loudly.
+#   cmake -B build -DOPENGLITCH_BUILD_TESTS=ON && ctest --test-dir build
+# ---------------------------------------------------------------------------
+option(OPENGLITCH_BUILD_TESTS "Build the Catch2/CTest test suite" OFF)
+if(OPENGLITCH_BUILD_TESTS)
+    include(CTest)
+    FetchContent_Declare(Catch2
+        GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+        GIT_TAG        v3.15.3
+        GIT_SHALLOW    TRUE)
+    FetchContent_MakeAvailable(Catch2)
+
+    juce_add_console_app(OpenGlitchTests PRODUCT_NAME "OpenGlitchTests")
+    target_sources(OpenGlitchTests PRIVATE
+        tests/DspEngineTests.cpp
+        tests/LfoEngineTests.cpp
+        tests/HostSimTests.cpp
+        src/PluginProcessor.cpp
+        src/PluginEditor.cpp)
+    target_include_directories(OpenGlitchTests PRIVATE src tests)
+    target_compile_definitions(OpenGlitchTests PRIVATE
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+        JUCE_MODAL_LOOPS_PERMITTED=1) # tests pump the message loop to flush async updates
+    target_link_libraries(OpenGlitchTests PRIVATE
+        OpenGlitchDSP
+        Catch2::Catch2WithMain
+        juce::juce_audio_utils
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)
+
+    list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/extras")
+    include(Catch)
+    catch_discover_tests(OpenGlitchTests PROPERTIES TIMEOUT 60)
 endif()

@@ -83,6 +83,21 @@ Step 1 is always the start of a bar. On transport stop the engine falls back
 to clean dry. Without a timeline (standalone) the Phase 2 free-running
 120 BPM metro takes over.
 
+## Tests
+
+A Catch2/CTest suite covers three layers: the Heavy DSP engine driven
+directly (sequencer, effects, external clock, swing/length timing, filter
+modes), the pure LFO/modulation math, and full host simulation (a fake
+`AudioPlayHead` feeding transport/tempo/ppq to the real processor — the layer
+neither pluginval nor DSP tests can see). Each test case runs as an isolated
+process with a timeout, so hangs fail instead of blocking.
+
+```sh
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DOPENGLITCH_BUILD_TESTS=ON
+cmake --build build --target OpenGlitchTests -j
+ctest --test-dir build -j$(nproc)
+```
+
 ## Building
 
 Requirements: CMake ≥ 3.22, a C++17 compiler, Python ≥ 3.9, and (on Linux) the
