@@ -49,3 +49,23 @@ TEST_CASE ("advance: S&H refreshes once per cycle, ppq lock pins phase", "[lfo]"
     lfo::advance (s, lfo::sine, 1.0, 1.0, 0.1, true, 2.3, rng);
     REQUIRE_THAT (s.phase, WithinAbs (0.3, 1e-9));
 }
+
+TEST_CASE ("extended targets combine within their ranges", "[lfo]")
+{
+    using namespace lfo;
+    REQUIRE_THAT (applyMod (crushRate, 2500.0f, 1.0), WithinAbs (20000.0, 0.5));
+    REQUIRE_THAT (applyMod (crushRate, 2500.0f, -1.0), WithinAbs (312.5, 0.5));
+    REQUIRE_THAT (applyMod (crushDrive, 2.0f, 1.0), WithinAbs (6.5, 1e-4));
+    REQUIRE_THAT (applyMod (delayFeedback, 0.55f, 1.0), WithinAbs (0.95, 1e-4));
+    REQUIRE_THAT (applyMod (stretchSpeed, 0.5f, -1.0), WithinAbs (0.1, 1e-4));
+    REQUIRE_THAT (applyMod (tapestopSpeed, 1.0f, 1.0), WithinAbs (2.0, 1e-4));
+    REQUIRE_THAT (applyMod (retrigRate, 4.0f, 1.0), WithinAbs (7.5, 1e-4));
+    REQUIRE_THAT (applyMod (gateRate, 4.0f, 1.0), WithinAbs (11.5, 1e-4));
+
+    // zero contribution stays an exact identity
+    REQUIRE (applyMod (crushRate, 2500.0f, 0.0) == 2500.0f);
+    REQUIRE (applyMod (gateRate, 4.0f, 0.0) == 4.0f);
+    // the derivative targets never touch parameter values
+    REQUIRE (applyMod (lfo1Rate, 123.0f, 1.0) == 123.0f);
+    REQUIRE (applyMod (lfo1Depth, 123.0f, 1.0) == 123.0f);
+}

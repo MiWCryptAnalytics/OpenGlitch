@@ -902,13 +902,15 @@ void LfoPanel::drawScope (juce::Graphics& g, juce::Rectangle<float> r) const
 
     // Routing labels
     static const char* const targetNames[] = { "OFF", "FILTER", "DRIVE", "CHAOS", "MOD",
-                                               "PITCH", "DUTY", "L1 RATE", "L1 DEPTH" };
+                                               "PITCH", "DUTY", "CRUSH", "C.DRIVE", "DLY FB",
+                                               "STRETCH", "TAPE", "R.RATE", "G.RATE",
+                                               "L1 RATE", "L1 DEPTH" };
     g.setFont (juce::Font (juce::FontOptions (9.5f)).boldened());
     g.setColour (magenta.withAlpha (0.75f));
-    g.drawText (juce::String ("1 > ") + targetNames[juce::jlimit (0, 8, c[0].target)],
+    g.drawText (juce::String ("1 > ") + targetNames[juce::jlimit (0, 15, c[0].target)],
                 (int) r.getX() + 6, (int) r.getY() + 3, 84, 11, juce::Justification::centredLeft);
     g.setColour (cyan.withAlpha (0.75f));
-    g.drawText (juce::String ("2 > ") + targetNames[juce::jlimit (0, 8, c[1].target)],
+    g.drawText (juce::String ("2 > ") + targetNames[juce::jlimit (0, 15, c[1].target)],
                 (int) r.getRight() - 90, (int) r.getY() + 3, 84, 11, juce::Justification::centredRight);
 }
 

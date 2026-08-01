@@ -590,3 +590,23 @@ TEST_CASE ("host: templates load factory patterns into the active slot", "[host]
     REQUIRE (step (1) == 3);
     REQUIRE (step (14) == 10);
 }
+
+TEST_CASE ("host: LFO on crush rate audibly animates the crusher", "[host][lfo]")
+{
+    auto runCrusher = [] (float lfoDepth)
+    {
+        Harness h;
+        h.playhead.playing = true;
+        h.setAllSteps (6.0f); // crusher everywhere
+        h.setParam ("lfo1_target", (float) lfo::crushRate);
+        h.setParam ("lfo1_rate", 2.0f); // 1/4
+        h.setParam ("lfo1_depth", lfoDepth);
+        h.run (0.3);
+        return h.run (1.5);
+    };
+
+    auto still = runCrusher (0.0f);
+    auto swept = runCrusher (1.0f);
+    REQUIRE (allFinite (swept));
+    REQUIRE (maxDiff (swept, still) > 0.05f);
+}

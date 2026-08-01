@@ -173,7 +173,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout OpenGlitchAudioProcessor::cr
     const juce::StringArray shapes { "Sine", "Triangle", "Saw", "Square", "Random" };
     const juce::StringArray rates { "1/16", "1/8", "1/4", "1/2", "1 bar", "2 bars", "4 bars" };
     const juce::StringArray targets1 { "Off", "Filter Freq", "Drive", "Chaos",
-                                       "Mod Freq", "Retrig Pitch", "Gate Duty" };
+                                       "Mod Freq", "Retrig Pitch", "Gate Duty",
+                                       "Crush Rate", "Crush Drive", "Delay Feedback",
+                                       "Stretch Speed", "TapeStop Speed",
+                                       "Retrig Rate", "Gate Rate" };
     juce::StringArray targets2 = targets1;
     targets2.addArray ({ "LFO1 Rate", "LFO1 Depth" });
 
@@ -229,6 +232,10 @@ OpenGlitchAudioProcessor::OpenGlitchAudioProcessor()
         { "master_lowpass", lfo::filterFreq }, { "master_drive", lfo::drive },
         { "seq_chaos", lfo::chaos },           { "fx_mod_freq", lfo::modFreq },
         { "fx_retrigger_pitch", lfo::retrigPitch }, { "fx_gate_duty", lfo::gateDuty },
+        { "fx_crush_rate", lfo::crushRate },   { "fx_crush_drive", lfo::crushDrive },
+        { "fx_delay_feedback", lfo::delayFeedback }, { "fx_stretch_speed", lfo::stretchSpeed },
+        { "fx_tapestop_speed", lfo::tapestopSpeed }, { "fx_retrigger_rate", lfo::retrigRate },
+        { "fx_gate_rate", lfo::gateRate },
     };
     for (auto& link : paramLinks)
         for (const auto& [id, target] : modTargets)
