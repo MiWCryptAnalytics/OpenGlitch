@@ -380,9 +380,13 @@ void StepMatrix::mouseUp (const juce::MouseEvent& e)
         handleRelease();
 }
 
-void StepMatrix::mouseMove (const juce::MouseEvent&)
+void StepMatrix::mouseMove (const juce::MouseEvent& e)
 {
-    lastMouseActivityMs = juce::Time::getMillisecondCounter();
+    if (e.position.getDistanceFrom (lastMovePos) > 2.0f)
+    {
+        lastMouseActivityMs = juce::Time::getMillisecondCounter();
+        lastMovePos = e.position;
+    }
 }
 
 void StepMatrix::paint (juce::Graphics& g)

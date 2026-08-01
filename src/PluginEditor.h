@@ -88,9 +88,11 @@ private:
     int lastPaintCol = -1, lastPaintRow = -1; // for drag-to-span gestures
 
     // Grid tips hold off until the hand has settled, so they don't pop up
-    // mid-pattern-drawing; every mouse event restarts the quiet period.
+    // mid-pattern-drawing; real pointer travel (not the synthetic move the
+    // appearing tip window itself generates) restarts the quiet period.
     static constexpr juce::uint32 tipHoldOffMs = 900;
     juce::uint32 lastMouseActivityMs = 0;
+    juce::Point<float> lastMovePos { -100.0f, -100.0f };
 };
 
 // Strip below the matrix: pattern banks 1..16 (click to switch, shift-click to
