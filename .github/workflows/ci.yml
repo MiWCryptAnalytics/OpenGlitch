@@ -25,15 +25,14 @@ jobs:
         include:
           - name: linux
             os: ubuntu-latest
-            generator: Ninja
-            cmake_flags: ''
+            cmake_flags: -G Ninja
           - name: macos
             os: macos-latest
-            generator: Ninja
-            cmake_flags: -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13
+            cmake_flags: -G Ninja -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13
+          # No -G on Windows: the runner image decides the Visual Studio
+          # version, so a pinned generator string can't go stale.
           - name: windows
             os: windows-latest
-            generator: Visual Studio 17 2022
             cmake_flags: ''
 
     steps:
@@ -51,7 +50,7 @@ jobs:
 
       - name: Configure
         run: >
-          cmake -B build -G "${{ matrix.generator }}"
+          cmake -B build
           -DCMAKE_BUILD_TYPE=Release
           -DOPENGLITCH_BUILD_TESTS=ON
           -DOPENGLITCH_INSTALL_PLUGIN=OFF
