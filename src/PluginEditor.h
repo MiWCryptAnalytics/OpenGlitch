@@ -39,10 +39,13 @@ public:
 
 // The 9x16 effect matrix: click assigns, click-again clears, drag paints,
 // right-click erases the column. One effect per column, like the original.
-class StepMatrix : public juce::Component
+class StepMatrix : public juce::Component,
+                   public juce::TooltipClient
 {
 public:
     explicit StepMatrix (juce::AudioProcessorValueTreeState& state);
+
+    juce::String getTooltip() override; // per-effect blurbs + the gesture cheat sheet
 
     std::function<void (int effectIndex)> onEffectTouched;
 
@@ -86,10 +89,13 @@ private:
 
 // Strip below the matrix: pattern slots A..H (click to switch, shift-click to
 // copy the current pattern there), plus pattern length and swing.
-class SequencerBar : public juce::Component
+class SequencerBar : public juce::Component,
+                     public juce::TooltipClient
 {
 public:
     explicit SequencerBar (OpenGlitchAudioProcessor& proc);
+
+    juce::String getTooltip() override; // teaches shift-click copy + MIDI switching
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -125,7 +131,8 @@ private:
         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
     };
 
-    Knob* addKnob (juce::AudioProcessorValueTreeState& state, const char* paramID, const char* name);
+    Knob* addKnob (juce::AudioProcessorValueTreeState& state, const char* paramID,
+                   const char* name, const char* tooltip);
 
     juce::AudioProcessorValueTreeState& stateRef;
     std::vector<std::unique_ptr<Knob>> knobs;
@@ -205,7 +212,7 @@ private:
     };
 
     void addFader (juce::AudioProcessorValueTreeState& state, const char* paramID,
-                   const char* name, juce::Colour colour);
+                   const char* name, juce::Colour colour, const char* tooltip);
 
     std::vector<std::unique_ptr<Fader>> faders;
     juce::Slider mixSlider, volSlider, sweepAmtSlider;
@@ -219,21 +226,51 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> bypassAttachment;
 };
 
-class OpenGlitchAudioProcessorEditor : public juce::AudioProcessorEditor,
-                                       private juce::Timer
+// Full-surface scrim + credits card, opened by clicking the logo. Any click
+// dismisses it.
+class AboutOverlay : public juce::Component
 {
 public:
-    explicit OpenGlitchAudioProcessorEditor (OpenGlitchAudioProcessor&);
-    ~OpenGlitchAudioProcessorEditor() override;
+    AboutOverlay();
 
     void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override { setVisible (false); }
+};
+
+// The whole 940x700 control surface at its fixed logical size. The editor
+// hosts this behind an AffineTransform so one scale factor resizes the
+// pixel-perfect layout instead of reflowing it.
+class EditorContent : public juce::Component,
+                      public juce::TooltipClient,
+                      public juce::FileDragAndDropTarget,
+                      private juce::Timer
+{
+public:
+    static constexpr int baseWidth = 940, baseHeight = 700;
+
+    explicit EditorContent (OpenGlitchAudioProcessor&);
+
+    void paint (juce::Graphics&) override;
+    void paintOverChildren (juce::Graphics&) override; // drag-and-drop hint
     void resized() override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseMove (const juce::MouseEvent&) override;
+    juce::String getTooltip() override; // hints that the logo opens the About card
+
+    // Loop-player drag-and-drop (standalone only)
+    bool isInterestedInFileDrag (const juce::StringArray& files) override;
+    void filesDropped (const juce::StringArray& files, int x, int y) override;
+    void fileDragEnter (const juce::StringArray&, int, int) override;
+    void fileDragExit (const juce::StringArray&) override;
 
 private:
     void timerCallback() override;
+    void refreshLoopStrip();
+    void openLoopFileChooser();
+    void loadLoopFileIntoPlayer (const juce::File& file);
+    static juce::Rectangle<int> logoBounds() { return { 18, 8, 190, 36 }; }
 
     OpenGlitchAudioProcessor& processorRef;
-    OpenGlitchLookAndFeel lookAndFeel;
 
     StepMatrix matrix;
     SequencerBar sequencerBar;
@@ -247,6 +284,33 @@ private:
     juce::TextButton fxDiceButton { "FX" };
     juce::TextButton shiftLeftButton { "<" };
     juce::TextButton shiftRightButton { ">" };
+
+    // Standalone loop player strip
+    juce::TextButton loopOpenButton { "OPEN" };
+    juce::TextButton loopPlayButton { "PLAY" };
+    juce::Label loopNameLabel;
+    std::unique_ptr<juce::FileChooser> loopChooser;
+    bool fileDragActive = false;
+
+    AboutOverlay about;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (EditorContent)
+};
+
+class OpenGlitchAudioProcessorEditor : public juce::AudioProcessorEditor
+{
+public:
+    explicit OpenGlitchAudioProcessorEditor (OpenGlitchAudioProcessor&);
+    ~OpenGlitchAudioProcessorEditor() override;
+
+    void paint (juce::Graphics&) override;
+    void resized() override;
+
+private:
+    OpenGlitchAudioProcessor& processorRef;
+    OpenGlitchLookAndFeel lookAndFeel;
+    EditorContent content;
+    juce::TooltipWindow tooltips { this, 600 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (OpenGlitchAudioProcessorEditor)
 };

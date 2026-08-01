@@ -49,6 +49,30 @@ int main (int argc, char** argv)
 
     std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditor());
 
+    // "--about" renders the credits overlay instead of the main surface.
+    std::function<juce::Component* (juce::Component&, const juce::String&)> findByID =
+        [&] (juce::Component& root, const juce::String& id) -> juce::Component*
+    {
+        if (root.getComponentID() == id)
+            return &root;
+        for (auto* child : root.getChildren())
+            if (auto* hit = findByID (*child, id))
+                return hit;
+        return nullptr;
+    };
+    for (int a = 2; a < argc; ++a)
+        if (juce::String (argv[a]) == "--about")
+            if (auto* about = findByID (*editor, "aboutOverlay"))
+                about->setVisible (true);
+
+    // "--scale 1.5" simulates the user dragging the resize corner.
+    for (int a = 2; a < argc - 1; ++a)
+        if (juce::String (argv[a]) == "--scale")
+            editor->setSize (juce::roundToInt (editor->getWidth()
+                                               * juce::String (argv[a + 1]).getDoubleValue()),
+                             juce::roundToInt (editor->getHeight()
+                                               * juce::String (argv[a + 1]).getDoubleValue()));
+
     auto snapshot = editor->createComponentSnapshot (editor->getLocalBounds(), true, 2.0f);
 
     auto file = juce::File::getCurrentWorkingDirectory().getChildFile (

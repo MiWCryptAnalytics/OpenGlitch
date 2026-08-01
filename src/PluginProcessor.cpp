@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <limits>
 
+#include <juce_audio_formats/juce_audio_formats.h>
+
 #include "PluginEditor.h"
 
 namespace
@@ -865,6 +867,29 @@ void OpenGlitchAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         }
     }
 
+    // Standalone loop player: overwrite the input with the looping file
+    // before the engine sees it. Under a real host this whole branch is off.
+    if (loopPlayerAvailable())
+    {
+        {
+            const juce::ScopedTryLock adoption (loopLock);
+            if (adoption.isLocked() && loopSwapPending)
+            {
+                std::swap (loopCurrent, loopStaged); // retired buffer dies on the message thread
+                loopSwapPending = false;
+                loopPosition = 0.0;
+            }
+        }
+        if (loopRestart.exchange (false, std::memory_order_relaxed))
+        {
+            loopPosition = 0.0;
+            standalonePpq = 0.0; // restart the bar with the loop so step 1 lands on its downbeat
+            lastFiredTick = std::numeric_limits<long long>::min();
+        }
+        if (loopCurrent != nullptr && loopPlaying.load (std::memory_order_relaxed))
+            renderLoopInput (buffer, buffer.getNumSamples());
+    }
+
     updateLfos (buffer.getNumSamples());
     pushChangedParameters();
     pushPostParameters();
@@ -936,6 +961,73 @@ void OpenGlitchAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         outputPeaks[(size_t) idx & 255] = buffer.getMagnitude (0, 0, processable);
         outputPeakIndex.store (idx + 1, std::memory_order_relaxed);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Standalone loop player
+// ---------------------------------------------------------------------------
+juce::String OpenGlitchAudioProcessor::loadLoopFile (const juce::File& file)
+{
+    juce::AudioFormatManager formats;
+    formats.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file));
+    if (reader == nullptr)
+        return "can't read " + file.getFileName();
+
+    // A drum break is seconds long; cap absurd drops (10 min) instead of
+    // swallowing arbitrary amounts of RAM.
+    const auto numSamples = (int) juce::jmin (reader->lengthInSamples,
+                                              (juce::int64) (reader->sampleRate * 600.0));
+    if (numSamples <= 0)
+        return file.getFileName() + " is empty";
+
+    auto sample = std::make_shared<LoopSample>();
+    sample->audio.setSize (2, numSamples);
+    reader->read (&sample->audio, 0, numSamples, 0, true, true);
+    sample->sampleRate = reader->sampleRate > 0.0 ? reader->sampleRate : 44100.0;
+
+    {
+        const juce::ScopedLock staging (loopLock);
+        loopStaged = std::move (sample);
+        loopSwapPending = true;
+    }
+    loopFileName = file.getFileName();
+    loopLoaded.store (true, std::memory_order_relaxed);
+    setLoopPlaying (true);
+    return {};
+}
+
+void OpenGlitchAudioProcessor::setLoopPlaying (bool shouldPlay)
+{
+    loopPlaying.store (shouldPlay, std::memory_order_relaxed);
+    if (shouldPlay)
+        loopRestart.store (true, std::memory_order_relaxed);
+}
+
+void OpenGlitchAudioProcessor::renderLoopInput (juce::AudioBuffer<float>& buffer, int numSamples)
+{
+    const auto& src = loopCurrent->audio;
+    const int length = src.getNumSamples();
+    const double sr = getSampleRate();
+    const double ratio = sr > 0.0 ? loopCurrent->sampleRate / sr : 1.0; // linear-interp resample
+    const int numChannels = juce::jmin (2, buffer.getNumChannels());
+
+    double pos = loopPosition;
+    for (int i = 0; i < numSamples; ++i)
+    {
+        const int i0 = (int) pos;
+        const int i1 = i0 + 1 < length ? i0 + 1 : 0;
+        const float frac = (float) (pos - (double) i0);
+        for (int ch = 0; ch < numChannels; ++ch)
+        {
+            const float a = src.getSample (ch, i0);
+            buffer.setSample (ch, i, a + frac * (src.getSample (ch, i1) - a));
+        }
+        pos += ratio;
+        while (pos >= (double) length)
+            pos -= (double) length;
+    }
+    loopPosition = pos;
 }
 
 juce::AudioProcessorEditor* OpenGlitchAudioProcessor::createEditor()

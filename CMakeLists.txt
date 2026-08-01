@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.22)
 
 project(OpenGlitch
-    VERSION 0.1.0
+    VERSION 1.0.0
     DESCRIPTION "Open-source port of dblue Glitch 1.3 (Pure Data + hvcc + JUCE)"
     LANGUAGES C CXX)
 
@@ -132,7 +132,8 @@ target_compile_definitions(OpenGlitch PUBLIC
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
     JUCE_VST3_CAN_REPLACE_VST2=0
-    JUCE_DISPLAY_SPLASH_SCREEN=0)
+    JUCE_DISPLAY_SPLASH_SCREEN=0
+    OPENGLITCH_VERSION="${PROJECT_VERSION}")
 
 target_link_libraries(OpenGlitch
     PRIVATE
@@ -141,6 +142,34 @@ target_link_libraries(OpenGlitch
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)
+
+# ---------------------------------------------------------------------------
+# Release packaging: stage the built formats and zip them under a versioned
+# name — the same name Phase 5 CI will publish on tags.
+#   cmake --build build --target openglitch_package
+# ---------------------------------------------------------------------------
+set(OPENGLITCH_PACKAGE_NAME
+    "OpenGlitch-v${PROJECT_VERSION}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
+set(OPENGLITCH_PACKAGE_STAGE "${CMAKE_BINARY_DIR}/package/${OPENGLITCH_PACKAGE_NAME}")
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/package")
+add_custom_target(openglitch_package
+    COMMAND ${CMAKE_COMMAND} -E rm -rf "${OPENGLITCH_PACKAGE_STAGE}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${OPENGLITCH_PACKAGE_STAGE}"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_BINARY_DIR}/OpenGlitch_artefacts/$<CONFIG>/VST3/OpenGlitch.vst3"
+            "${OPENGLITCH_PACKAGE_STAGE}/OpenGlitch.vst3"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_BINARY_DIR}/OpenGlitch_artefacts/$<CONFIG>/Standalone"
+            "${OPENGLITCH_PACKAGE_STAGE}"
+    COMMAND ${CMAKE_COMMAND} -E copy
+            "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" "${CMAKE_CURRENT_SOURCE_DIR}/README.md"
+            "${OPENGLITCH_PACKAGE_STAGE}"
+    COMMAND ${CMAKE_COMMAND} -E tar cf
+            "${CMAKE_BINARY_DIR}/${OPENGLITCH_PACKAGE_NAME}.zip" --format=zip
+            "${OPENGLITCH_PACKAGE_NAME}"
+    WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/package"
+    DEPENDS OpenGlitch_VST3 OpenGlitch_Standalone
+    COMMENT "Packaging ${OPENGLITCH_PACKAGE_NAME}.zip")
 
 # ---------------------------------------------------------------------------
 # Developer tools: headless UI screenshot renderer (also usable from CI)
@@ -155,7 +184,8 @@ if(OPENGLITCH_BUILD_TOOLS)
     target_include_directories(OpenGlitchScreenshot PRIVATE src)
     target_compile_definitions(OpenGlitchScreenshot PRIVATE
         JUCE_WEB_BROWSER=0
-        JUCE_USE_CURL=0)
+        JUCE_USE_CURL=0
+        OPENGLITCH_VERSION="${PROJECT_VERSION}")
     target_link_libraries(OpenGlitchScreenshot PRIVATE
         OpenGlitchDSP
         juce::juce_audio_utils
@@ -190,6 +220,7 @@ if(OPENGLITCH_BUILD_TESTS)
     target_compile_definitions(OpenGlitchTests PRIVATE
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
+        OPENGLITCH_VERSION="${PROJECT_VERSION}"
         JUCE_PLUGINHOST_VST3=1 # wrapper tests host the built .vst3 like a DAW
         OPENGLITCH_VST3_DIR="${CMAKE_BINARY_DIR}/OpenGlitch_artefacts/${CMAKE_BUILD_TYPE}/VST3/OpenGlitch.vst3"
         JUCE_MODAL_LOOPS_PERMITTED=1) # tests pump the message loop to flush async updates

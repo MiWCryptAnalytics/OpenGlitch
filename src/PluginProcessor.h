@@ -2,6 +2,7 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
+#include <memory>
 #include <vector>
 
 #include "Heavy_OpenGlitch.h"
@@ -75,6 +76,19 @@ public:
     float getLfoPhase (int lfoIndex) const noexcept { return lfoPhaseA[lfoIndex].load (std::memory_order_relaxed); }
     float getLfoValue (int lfoIndex) const noexcept { return lfoValueA[lfoIndex].load (std::memory_order_relaxed); }
     float getBarPhase() const noexcept { return diagBarPhase.load (std::memory_order_relaxed); }
+
+    // Standalone loop player: a dropped WAV/FLAC replaces the live input so
+    // the standalone demos itself without any routing setup. Disabled when a
+    // real plugin host supplies the input.
+    bool loopPlayerAvailable() const noexcept
+    {
+        return wrapperType == wrapperType_Standalone || wrapperType == wrapperType_Undefined;
+    }
+    juce::String loadLoopFile (const juce::File& file); // message thread; "" on success
+    void setLoopPlaying (bool shouldPlay);
+    bool isLoopPlaying() const noexcept { return loopPlaying.load (std::memory_order_relaxed); }
+    bool hasLoopFile() const noexcept { return loopLoaded.load (std::memory_order_relaxed); }
+    juce::String getLoopFileName() const { return loopFileName; } // message thread only
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
@@ -156,6 +170,25 @@ private:
     float lastAppliedVolume = 1.0f;
 
     juce::AudioParameterBool* bypassParam = nullptr;
+
+    // Loop player plumbing: the message thread stages a decoded file under
+    // loopLock, the audio thread adopts it with a try-lock swap — so buffers
+    // are always freed on the message thread, never mid-callback.
+    struct LoopSample
+    {
+        juce::AudioBuffer<float> audio; // always stereo (mono sources duplicated)
+        double sampleRate = 44100.0;
+    };
+    void renderLoopInput (juce::AudioBuffer<float>& buffer, int numSamples);
+    juce::CriticalSection loopLock;
+    std::shared_ptr<LoopSample> loopStaged;  // guarded by loopLock
+    bool loopSwapPending = false;            // guarded by loopLock
+    std::shared_ptr<LoopSample> loopCurrent; // audio thread only
+    double loopPosition = 0.0;               // audio thread, in source samples
+    std::atomic<bool> loopPlaying { false };
+    std::atomic<bool> loopLoaded { false };
+    std::atomic<bool> loopRestart { false };
+    juce::String loopFileName; // message thread only
 
     // Heavy's SIMD loads/stores require 16/32-byte aligned channel buffers.
     // Host buffers (and juce::AudioBuffer channels) don't guarantee that, so

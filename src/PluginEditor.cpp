@@ -1,5 +1,11 @@
 #include "PluginEditor.h"
 
+// Normally injected by CMake from the project version; the fallback keeps
+// ad-hoc builds (IDEs, single-file syntax checks) compiling.
+#ifndef OPENGLITCH_VERSION
+ #define OPENGLITCH_VERSION "0.0.0-dev"
+#endif
+
 namespace glitch
 {
 juce::Colour effectColour (int effectIndex)
@@ -67,6 +73,9 @@ OpenGlitchLookAndFeel::OpenGlitchLookAndFeel()
     setColour (juce::PopupMenu::textColourId, text);
     setColour (juce::PopupMenu::highlightedBackgroundColourId, juce::Colour (0xffffb300));
     setColour (juce::PopupMenu::highlightedTextColourId, bg);
+    setColour (juce::TooltipWindow::backgroundColourId, juce::Colour (0xff262b33));
+    setColour (juce::TooltipWindow::textColourId, text);
+    setColour (juce::TooltipWindow::outlineColourId, cellStroke);
 }
 
 void OpenGlitchLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int width, int height,
@@ -255,6 +264,25 @@ void StepMatrix::clearAll()
 {
     for (int i = 0; i < 16; ++i)
         setStep (i, 0);
+}
+
+juce::String StepMatrix::getTooltip()
+{
+    const auto pos = getMouseXYRelative().toFloat();
+    const int row = (int) std::floor ((pos.y - lampHeight) / rowHeight());
+    if (row < 0 || row > 8)
+        return {};
+
+    if (pos.x < (float) labelWidth)
+        return juce::String (glitch::effectName (row + 1)) + ": " + glitch::effectBlurb (row + 1);
+
+    int col = 0, cellRow = 0;
+    if (locateCell (pos, col, cellRow))
+        return juce::String (glitch::effectName (cellRow + 1)) + ": "
+               + glitch::effectBlurb (cellRow + 1)
+               + "\n\nClick paints, click again clears. Hold and drag right to stretch "
+                 "the block across steps (tie). Right-click erases the column.";
+    return {};
 }
 
 void StepMatrix::handlePress (int col, int row)
@@ -480,6 +508,8 @@ SequencerBar::SequencerBar (OpenGlitchAudioProcessor& proc)
     }
     lengthSlider.setColour (juce::Slider::rotarySliderFillColourId, glitch::palette::lamp);
     swingSlider.setColour (juce::Slider::rotarySliderFillColourId, juce::Colour (0xffe040fb));
+    lengthSlider.setTooltip ("Pattern length in steps. Shorten it for odd meters and polymeter loops.");
+    swingSlider.setTooltip ("Swing: every second 16th fires late.");
 
     lengthAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         proc.apvts, "seq_length", lengthSlider);
@@ -490,6 +520,17 @@ SequencerBar::SequencerBar (OpenGlitchAudioProcessor& proc)
 juce::Rectangle<float> SequencerBar::slotBounds (int slot) const
 {
     return { 58.0f + (float) slot * 19.5f, 3.0f, 17.5f, (float) getHeight() - 6.0f };
+}
+
+juce::String SequencerBar::getTooltip()
+{
+    const auto pos = getMouseXYRelative().toFloat();
+    for (int slot = 0; slot < OpenGlitchAudioProcessor::numPatterns; ++slot)
+        if (slotBounds (slot).contains (pos))
+            return "Pattern " + juce::String (slot + 1)
+                   + ": click to switch. Shift-click copies the current pattern here. "
+                     "MIDI notes 36-51 switch patterns live.";
+    return {};
 }
 
 void SequencerBar::resized()
@@ -557,25 +598,39 @@ EffectPanel::EffectPanel (juce::AudioProcessorValueTreeState& state)
     blurb.setColour (juce::Label::textColourId, textDim);
     addAndMakeVisible (blurb);
 
-    knobsForEffect[1] = { addKnob (state, "fx_tapestop_speed", "SPEED") };
-    knobsForEffect[2] = { addKnob (state, "fx_mod_freq", "FREQUENCY") };
-    knobsForEffect[3] = { addKnob (state, "fx_retrigger_rate", "SLICES"),
-                          addKnob (state, "fx_retrigger_pitch", "PITCH") };
-    knobsForEffect[4] = { addKnob (state, "fx_shuffle_range", "RANGE") };
+    knobsForEffect[1] = { addKnob (state, "fx_tapestop_speed", "SPEED",
+                                   "Wind-down speed in step lengths. Below 1x the tape stops early, then sucks backwards.") };
+    knobsForEffect[2] = { addKnob (state, "fx_mod_freq", "FREQUENCY",
+                                   "Ring-mod carrier. Slow is tremolo, fast turns drums into robot bells.") };
+    knobsForEffect[3] = { addKnob (state, "fx_retrigger_rate", "SLICES",
+                                   "How many slices of the step get looped."),
+                          addKnob (state, "fx_retrigger_pitch", "PITCH",
+                                   "Pitch of each repeat. Detune it for stutter arpeggios.") };
+    knobsForEffect[4] = { addKnob (state, "fx_shuffle_range", "RANGE",
+                                   "How many steps back the shuffler may dig.") };
     knobsForEffect[5] = {};
-    knobsForEffect[6] = { addKnob (state, "fx_crush_rate", "RATE"),
-                          addKnob (state, "fx_crush_drive", "DRIVE") };
-    knobsForEffect[7] = { addKnob (state, "fx_gate_rate", "RATE"),
-                          addKnob (state, "fx_gate_duty", "DUTY") };
-    knobsForEffect[8] = { addKnob (state, "fx_delay_div", "TIME"),
-                          addKnob (state, "fx_delay_feedback", "FEEDBACK") };
-    knobsForEffect[9] = { addKnob (state, "fx_stretch_speed", "SPEED") };
+    knobsForEffect[6] = { addKnob (state, "fx_crush_rate", "RATE",
+                                   "Sample-rate decimation target."),
+                          addKnob (state, "fx_crush_drive", "DRIVE",
+                                   "Pushes the wreckage into a hard clip.") };
+    knobsForEffect[7] = { addKnob (state, "fx_gate_rate", "RATE",
+                                   "Chops per step."),
+                          addKnob (state, "fx_gate_duty", "DUTY",
+                                   "Size of the holes the gate cuts.") };
+    knobsForEffect[8] = { addKnob (state, "fx_delay_div", "TIME",
+                                   "Echo time in step lengths."),
+                          addKnob (state, "fx_delay_feedback", "FEEDBACK",
+                                   "Echo regeneration (damped).") };
+    knobsForEffect[9] = { addKnob (state, "fx_stretch_speed", "SPEED",
+                                   "Playback speed. Half speed is an octave down.") };
 
     // The modulator gets a tempo-sync selector next to its frequency knob.
     if (auto* syncParam = dynamic_cast<juce::AudioParameterChoice*> (
             state.getParameter ("fx_mod_sync")))
     {
         modSyncBox.addItemList (syncParam->choices, 1);
+        modSyncBox.setTooltip ("Locks the ring-mod frequency to tempo divisions. "
+                               "Free uses the FREQUENCY knob.");
         addChildComponent (modSyncBox);
         modSyncLabel.setText ("SYNC", juce::dontSendNotification);
         modSyncLabel.setFont (juce::Font (juce::FontOptions (12.0f)).boldened());
@@ -593,6 +648,8 @@ EffectPanel::EffectPanel (juce::AudioProcessorValueTreeState& state)
     if (auto* modeParam = dynamic_cast<juce::AudioParameterChoice*> (
             state.getParameter ("fx1_post_mode")))
         outModeBox.addItemList (modeParam->choices, 1);
+    outModeBox.setTooltip ("Per-effect output filter. The shared output stage snaps to the "
+                           "firing effect's settings on every trigger.");
     addAndMakeVisible (outModeBox);
     sweepLabel.setText ("SWEEP", juce::dontSendNotification);
     sweepLabel.setFont (juce::Font (juce::FontOptions (11.0f)).boldened());
@@ -602,13 +659,23 @@ EffectPanel::EffectPanel (juce::AudioProcessorValueTreeState& state)
     if (auto* shapeParam = dynamic_cast<juce::AudioParameterChoice*> (
             state.getParameter ("fx1_sweep_shape")))
         sweepBox.addItemList (shapeParam->choices, 1);
+    sweepBox.setTooltip ("Sweep envelope for the output filter across the step - "
+                         "the original's waveform-button row.");
     addAndMakeVisible (sweepBox);
 
     static const char* const outNames[5] = { "FREQ", "PAN", "MIX", "GAIN", "SWP AMT" };
+    static const char* const outTips[5] = {
+        "Output filter cutoff for this effect's steps.",
+        "Stereo position for this effect's steps.",
+        "Wet/dry blend for this effect's steps.",
+        "Level trim for this effect's steps.",
+        "Sweep range in octaves. Negative sweeps downward."
+    };
     for (int k = 0; k < 5; ++k)
     {
         outKnobs[k].slider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
         outKnobs[k].slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 62, 14);
+        outKnobs[k].slider.setTooltip (outTips[k]);
         addAndMakeVisible (outKnobs[k].slider);
         outKnobs[k].label.setText (outNames[k], juce::dontSendNotification);
         outKnobs[k].label.setFont (juce::Font (juce::FontOptions (11.0f)).boldened());
@@ -621,11 +688,13 @@ EffectPanel::EffectPanel (juce::AudioProcessorValueTreeState& state)
 }
 
 EffectPanel::Knob* EffectPanel::addKnob (juce::AudioProcessorValueTreeState& state,
-                                         const char* paramID, const char* name)
+                                         const char* paramID, const char* name,
+                                         const char* tooltip)
 {
     auto knob = std::make_unique<Knob>();
     knob->slider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
     knob->slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 78, 16);
+    knob->slider.setTooltip (tooltip);
     addChildComponent (knob->slider);
 
     knob->nameLabel.setText (name, juce::dontSendNotification);
@@ -759,11 +828,17 @@ LfoPanel::LfoPanel (OpenGlitchAudioProcessor& proc)
         setupBox (col.shape, "shape", col.shapeAtt);
         setupBox (col.rate, "rate", col.rateAtt);
         setupBox (col.target, "target", col.targetAtt);
+        col.shape.setTooltip ("LFO waveform.");
+        col.rate.setTooltip ("Tempo-synced cycle length.");
+        col.target.setTooltip (n == 0
+            ? "What LFO 1 modulates."
+            : "What LFO 2 modulates - including LFO 1's rate and depth, for cascaded motion.");
 
         col.depth.setSliderStyle (juce::Slider::LinearHorizontal);
         col.depth.setTextBoxStyle (juce::Slider::TextBoxRight, false, 44, 15);
         col.depth.setColour (juce::Slider::rotarySliderFillColourId,
                              n == 0 ? juce::Colour (0xffe040fb) : juce::Colour (0xff4fc3f7));
+        col.depth.setTooltip ("Modulation amount.");
         addAndMakeVisible (col.depth);
         col.depthAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
             state, id ("depth"), col.depth);
@@ -775,13 +850,19 @@ LfoPanel::LfoPanel (OpenGlitchAudioProcessor& proc)
     addAndMakeVisible (seedLabel);
     seedSlider.setSliderStyle (juce::Slider::IncDecButtons);
     seedSlider.setTextBoxStyle (juce::Slider::TextBoxLeft, false, 38, 20);
+    seedSlider.setTooltip ("0 = surprise me. Any other seed makes the DICE and FX rolls "
+                           "reproducible - each press advances the same sequence.");
     addAndMakeVisible (seedSlider);
     seedAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         state, "seq_seed", seedSlider);
 
+    static const char* const templateNames[4] = { "stutter", "buildup",
+                                                  "halftime wreck", "ambient smear" };
     for (int t = 0; t < 4; ++t)
     {
         templateButtons[t].setButtonText ("T" + juce::String (t + 1));
+        templateButtons[t].setTooltip ("Load factory template: " + juce::String (templateNames[t])
+                                       + " (overwrites this pattern).");
         templateButtons[t].onClick = [this, t] { processor.loadTemplate (t); };
         addAndMakeVisible (templateButtons[t]);
     }
@@ -989,18 +1070,27 @@ void LfoPanel::paint (juce::Graphics& g)
 // ---------------------------------------------------------------------------
 MasterPanel::MasterPanel (juce::AudioProcessorValueTreeState& state)
 {
-    addFader (state, "seq_chaos", "CHAOS", juce::Colour (0xffe040fb));
-    addFader (state, "master_drive", "DRIVE", juce::Colour (0xffff7043));
-    addFader (state, "master_drive_mix", "D.MIX", juce::Colour (0xffffab91));
-    addFader (state, "master_reso", "RESO", juce::Colour (0xffba68c8));
-    addFader (state, "master_lowpass", "FILTER", juce::Colour (0xff4fc3f7));
-    addFader (state, "master_filter_mix", "F.MIX", juce::Colour (0xff4dd0e1));
-    addFader (state, "seq_declick", "CLICK", juce::Colour (0xffa1887f));
-    addFader (state, "seq_stepenv", "ENV", juce::Colour (0xff90a4ae));
+    addFader (state, "seq_chaos", "CHAOS", juce::Colour (0xffe040fb),
+              "Odds that a step fires a random effect instead of what's drawn.");
+    addFader (state, "master_drive", "DRIVE", juce::Colour (0xffff7043),
+              "Master saturation drive.");
+    addFader (state, "master_drive_mix", "D.MIX", juce::Colour (0xffffab91),
+              "Blend of the driven signal.");
+    addFader (state, "master_reso", "RESO", juce::Colour (0xffba68c8),
+              "Master filter resonance.");
+    addFader (state, "master_lowpass", "FILTER", juce::Colour (0xff4fc3f7),
+              "Master filter cutoff.");
+    addFader (state, "master_filter_mix", "F.MIX", juce::Colour (0xff4dd0e1),
+              "Blend of the filtered signal.");
+    addFader (state, "seq_declick", "CLICK", juce::Colour (0xffa1887f),
+              "De-click time: smooths the joins at step boundaries.");
+    addFader (state, "seq_stepenv", "ENV", juce::Colour (0xff90a4ae),
+              "Per-step fade-in/fade-out envelope.");
 
     mixSlider.setSliderStyle (juce::Slider::LinearHorizontal);
     mixSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 44, 15);
     mixSlider.setColour (juce::Slider::rotarySliderFillColourId, glitch::palette::lcd);
+    mixSlider.setTooltip ("Global wet/dry: how much OpenGlitch replaces the input.");
     addAndMakeVisible (mixSlider);
     mixAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         state, "master_mix", mixSlider);
@@ -1013,6 +1103,7 @@ MasterPanel::MasterPanel (juce::AudioProcessorValueTreeState& state)
     volSlider.setSliderStyle (juce::Slider::LinearHorizontal);
     volSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 44, 15);
     volSlider.setColour (juce::Slider::rotarySliderFillColourId, glitch::palette::text);
+    volSlider.setTooltip ("Master output volume, after everything else.");
     addAndMakeVisible (volSlider);
     volAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         state, "master_volume", volSlider);
@@ -1024,12 +1115,14 @@ MasterPanel::MasterPanel (juce::AudioProcessorValueTreeState& state)
     if (auto* shapeParam = dynamic_cast<juce::AudioParameterChoice*> (
             state.getParameter ("master_sweep_shape")))
         sweepShapeBox.addItemList (shapeParam->choices, 1);
+    sweepShapeBox.setTooltip ("Master filter sweep shape, retriggered every step.");
     addAndMakeVisible (sweepShapeBox);
     sweepShapeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
         state, "master_sweep_shape", sweepShapeBox);
     sweepAmtSlider.setSliderStyle (juce::Slider::LinearHorizontal);
     sweepAmtSlider.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
     sweepAmtSlider.setColour (juce::Slider::rotarySliderFillColourId, juce::Colour (0xff4fc3f7));
+    sweepAmtSlider.setTooltip ("Master sweep range in octaves. Negative sweeps downward.");
     addAndMakeVisible (sweepAmtSlider);
     sweepAmtAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         state, "master_sweep_amt", sweepAmtSlider);
@@ -1042,24 +1135,27 @@ MasterPanel::MasterPanel (juce::AudioProcessorValueTreeState& state)
             state.getParameter ("master_filter_type")))
     {
         filterTypeBox.addItemList (typeParam->choices, 1);
+        filterTypeBox.setTooltip ("Master filter topology.");
         addAndMakeVisible (filterTypeBox);
         filterTypeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
             state, "master_filter_type", filterTypeBox);
     }
 
     bypassButton.setClickingTogglesState (true);
+    bypassButton.setTooltip ("True bypass - also automatable from the host.");
     addAndMakeVisible (bypassButton);
     bypassAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
         state, "bypass", bypassButton);
 }
 
 void MasterPanel::addFader (juce::AudioProcessorValueTreeState& state, const char* paramID,
-                            const char* name, juce::Colour colour)
+                            const char* name, juce::Colour colour, const char* tooltip)
 {
     auto fader = std::make_unique<Fader>();
     fader->slider.setSliderStyle (juce::Slider::LinearVertical);
     fader->slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 58, 15);
     fader->slider.setColour (juce::Slider::rotarySliderFillColourId, colour);
+    fader->slider.setTooltip (tooltip);
     addAndMakeVisible (fader->slider);
 
     fader->nameLabel.setText (name, juce::dontSendNotification);
@@ -1122,19 +1218,111 @@ void MasterPanel::paint (juce::Graphics& g)
 }
 
 // ---------------------------------------------------------------------------
-// Editor
+// AboutOverlay
 // ---------------------------------------------------------------------------
-OpenGlitchAudioProcessorEditor::OpenGlitchAudioProcessorEditor (OpenGlitchAudioProcessor& p)
-    : juce::AudioProcessorEditor (&p),
-      processorRef (p),
+AboutOverlay::AboutOverlay()
+{
+    setComponentID ("aboutOverlay"); // lets the screenshot tool show it headlessly
+    setVisible (false);
+}
+
+void AboutOverlay::paint (juce::Graphics& g)
+{
+    using namespace glitch::palette;
+    g.fillAll (juce::Colours::black.withAlpha (0.65f));
+
+    auto card = juce::Rectangle<float> (0.0f, 0.0f, 560.0f, 392.0f)
+                    .withCentre (getLocalBounds().toFloat().getCentre());
+    g.setColour (panel);
+    g.fillRoundedRectangle (card, 10.0f);
+    g.setColour (glitch::effectColour (3).withAlpha (0.9f));
+    g.drawRoundedRectangle (card, 10.0f, 1.5f);
+
+    const int x = (int) card.getX() + 32;
+    const int w = (int) card.getWidth() - 64;
+    int y = (int) card.getY() + 24;
+
+    const auto titleFont = juce::Font (juce::FontOptions (26.0f)).boldened();
+    juce::GlyphArrangement measure;
+    measure.addLineOfText (titleFont, "OPEN", 0.0f, 0.0f);
+    const int openW = (int) std::ceil (measure.getBoundingBox (0, -1, true).getWidth());
+    g.setFont (titleFont);
+    g.setColour (text);
+    g.drawText ("OPEN", x, y, openW + 4, 28, juce::Justification::centredLeft);
+    g.setColour (glitch::effectColour (3));
+    g.drawText ("GLITCH", x + openW, y, 200, 28, juce::Justification::centredLeft);
+    g.setFont (juce::Font (juce::FontOptions (12.0f)));
+    g.setColour (textDim);
+    g.drawText (juce::String ("v") + OPENGLITCH_VERSION
+                    + juce::String::fromUTF8 ("  \xc2\xb7  build ") + __DATE__ + " " + __TIME__,
+                x, y + 30, w, 14, juce::Justification::centredLeft);
+    y += 58;
+
+    auto para = [&] (const juce::String& s, int lines, float size, juce::Colour c)
+    {
+        g.setFont (juce::Font (juce::FontOptions (size)));
+        g.setColour (c);
+        g.drawFittedText (s, x, y, w, lines * (int) (size + 4), juce::Justification::topLeft, lines);
+        y += lines * (int) (size + 4) + 10;
+    };
+    auto caption = [&] (const char* s)
+    {
+        g.setFont (juce::Font (juce::FontOptions (11.0f)).boldened());
+        g.setColour (glitch::effectColour (3).withAlpha (0.85f));
+        g.drawText (s, x, y, w, 13, juce::Justification::centredLeft);
+        y += 17;
+    };
+
+    para (juce::String::fromUTF8 ("An independent, GPL-licensed recreation of dblue Glitch 1.3 "
+                                  "\xe2\x80\x94 the discontinued freeware by Kieran Foster. Not "
+                                  "affiliated with or endorsed by illformed."),
+          2, 12.5f, text);
+
+    caption ("CREDITS");
+    para ("Original concept and design: Kieran Foster (illformed)\n"
+          "DSP graph: Pure Data, compiled by hvcc (the Wasted Audio fork)\n"
+          "Plugin wrapper and GUI: JUCE 8",
+          3, 12.0f, textDim);
+
+    caption ("LICENSE");
+    para ("GNU General Public License v3. Free software with ABSOLUTELY NO WARRANTY;\n"
+          "you may redistribute and modify it under the GPL's terms.",
+          2, 12.0f, textDim);
+
+    caption ("HIDDEN MOVES");
+    para ("Drag right on the grid to stretch a block across steps (tie)\n"
+          "Shift-click a pattern slot to copy the current pattern into it\n"
+          "Right-click erases; drag to sweep columns clear\n"
+          "MIDI notes 36-51 switch patterns; SEED makes DICE reproducible",
+          4, 12.0f, textDim);
+
+    g.setFont (juce::Font (juce::FontOptions (10.5f)));
+    g.setColour (textDim.withAlpha (0.7f));
+    g.drawText ("click anywhere to close", (int) card.getX(), (int) card.getBottom() - 24,
+                (int) card.getWidth(), 14, juce::Justification::centred);
+}
+
+// ---------------------------------------------------------------------------
+// EditorContent
+// ---------------------------------------------------------------------------
+namespace
+{
+bool looksLikeLoopFile (const juce::String& name)
+{
+    return name.endsWithIgnoreCase (".wav") || name.endsWithIgnoreCase (".flac")
+        || name.endsWithIgnoreCase (".aif") || name.endsWithIgnoreCase (".aiff")
+        || name.endsWithIgnoreCase (".ogg") || name.endsWithIgnoreCase (".mp3");
+}
+} // namespace
+
+EditorContent::EditorContent (OpenGlitchAudioProcessor& p)
+    : processorRef (p),
       matrix (p.apvts),
       sequencerBar (p),
       effectPanel (p.apvts),
       lfoPanel (p),
       masterPanel (p.apvts)
 {
-    setLookAndFeel (&lookAndFeel);
-
     addAndMakeVisible (matrix);
     addAndMakeVisible (sequencerBar);
     addAndMakeVisible (effectPanel);
@@ -1147,35 +1335,161 @@ OpenGlitchAudioProcessorEditor::OpenGlitchAudioProcessorEditor (OpenGlitchAudioP
         juce::Font::getDefaultMonospacedFontName(), 15.0f, juce::Font::plain)));
     lcdLabel.setColour (juce::Label::textColourId, glitch::palette::lcd);
     lcdLabel.setJustificationType (juce::Justification::centred);
+    lcdLabel.setTooltip ("Active pattern | playing step | tempo.");
     addAndMakeVisible (lcdLabel);
 
+    clearButton.setTooltip ("Wipe the pattern.");
     clearButton.onClick = [this] { matrix.clearAll(); };
     addAndMakeVisible (clearButton);
+    diceButton.setTooltip ("Roll a random pattern. SEED makes it reproducible.");
     diceButton.onClick = [this] { processorRef.randomizeActivePattern(); };
     addAndMakeVisible (diceButton);
+    fxDiceButton.setTooltip ("Randomize the effect knobs and output strips.");
     fxDiceButton.onClick = [this] { processorRef.randomizeFxKnobs(); };
     addAndMakeVisible (fxDiceButton);
+    shiftLeftButton.setTooltip ("Rotate the pattern one step earlier.");
     shiftLeftButton.onClick = [this] { processorRef.shiftActivePattern (-1); };
     addAndMakeVisible (shiftLeftButton);
+    shiftRightButton.setTooltip ("Rotate the pattern one step later.");
     shiftRightButton.onClick = [this] { processorRef.shiftActivePattern (1); };
     addAndMakeVisible (shiftRightButton);
 
     statusLabel.setFont (juce::Font (juce::FontOptions (
         juce::Font::getDefaultMonospacedFontName(), 11.0f, juce::Font::plain)));
     statusLabel.setColour (juce::Label::textColourId, glitch::palette::textDim);
+    statusLabel.setTooltip ("Clock source | ticks delivered to the engine | "
+                            "how much the engine is changing the audio.");
     addAndMakeVisible (statusLabel);
+
+    // Loop player strip: standalone (and dev tools) only — a host feeds the
+    // input everywhere else.
+    if (processorRef.loopPlayerAvailable())
+    {
+        loopOpenButton.setTooltip ("Load a loop file. Or just drop a WAV/FLAC "
+                                   "anywhere on the window.");
+        loopOpenButton.onClick = [this] { openLoopFileChooser(); };
+        addAndMakeVisible (loopOpenButton);
+
+        loopPlayButton.setClickingTogglesState (true);
+        loopPlayButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xff2e7d32));
+        loopPlayButton.setTooltip ("Loop the loaded file through the engine.");
+        loopPlayButton.onClick = [this]
+        {
+            processorRef.setLoopPlaying (loopPlayButton.getToggleState());
+            refreshLoopStrip();
+        };
+        addAndMakeVisible (loopPlayButton);
+
+        loopNameLabel.setFont (juce::Font (juce::FontOptions (11.0f)));
+        loopNameLabel.setJustificationType (juce::Justification::centredLeft);
+        addAndMakeVisible (loopNameLabel);
+        refreshLoopStrip();
+    }
+
+    addChildComponent (about); // last child: sits above everything when shown
 
     startTimerHz (30);
     timerCallback(); // seed the LCD before the first tick
-    setSize (940, 700);
 }
 
-OpenGlitchAudioProcessorEditor::~OpenGlitchAudioProcessorEditor()
+void EditorContent::refreshLoopStrip()
 {
-    setLookAndFeel (nullptr);
+    if (! processorRef.loopPlayerAvailable())
+        return;
+    const bool hasFile = processorRef.hasLoopFile();
+    const bool playing = hasFile && processorRef.isLoopPlaying();
+    loopPlayButton.setEnabled (hasFile);
+    loopPlayButton.setToggleState (playing, juce::dontSendNotification);
+    loopPlayButton.setButtonText (playing ? "STOP" : "PLAY");
+    loopNameLabel.setText (hasFile ? processorRef.getLoopFileName()
+                                   : juce::String ("drop a wav / flac"),
+                           juce::dontSendNotification);
+    loopNameLabel.setColour (juce::Label::textColourId,
+                             hasFile ? glitch::palette::lcd : glitch::palette::textDim);
 }
 
-void OpenGlitchAudioProcessorEditor::timerCallback()
+void EditorContent::loadLoopFileIntoPlayer (const juce::File& file)
+{
+    const auto error = processorRef.loadLoopFile (file);
+    if (error.isNotEmpty())
+    {
+        loopNameLabel.setText (error, juce::dontSendNotification);
+        loopNameLabel.setColour (juce::Label::textColourId, juce::Colour (0xffef5350));
+        return;
+    }
+    refreshLoopStrip();
+}
+
+void EditorContent::openLoopFileChooser()
+{
+    loopChooser = std::make_unique<juce::FileChooser> (
+        "Load a loop", juce::File(), "*.wav;*.flac;*.aif;*.aiff;*.ogg;*.mp3");
+    loopChooser->launchAsync (juce::FileBrowserComponent::openMode
+                                  | juce::FileBrowserComponent::canSelectFiles,
+                              [this] (const juce::FileChooser& chooser)
+                              {
+                                  if (chooser.getResult().existsAsFile())
+                                      loadLoopFileIntoPlayer (chooser.getResult());
+                              });
+}
+
+bool EditorContent::isInterestedInFileDrag (const juce::StringArray& files)
+{
+    if (! processorRef.loopPlayerAvailable())
+        return false;
+    for (const auto& f : files)
+        if (looksLikeLoopFile (f))
+            return true;
+    return false;
+}
+
+void EditorContent::fileDragEnter (const juce::StringArray&, int, int)
+{
+    fileDragActive = true;
+    repaint();
+}
+
+void EditorContent::fileDragExit (const juce::StringArray&)
+{
+    fileDragActive = false;
+    repaint();
+}
+
+void EditorContent::filesDropped (const juce::StringArray& files, int, int)
+{
+    fileDragActive = false;
+    repaint();
+    for (const auto& f : files)
+    {
+        if (looksLikeLoopFile (f))
+        {
+            loadLoopFileIntoPlayer (juce::File (f));
+            break;
+        }
+    }
+}
+
+void EditorContent::mouseDown (const juce::MouseEvent& e)
+{
+    if (logoBounds().contains (e.getPosition()))
+        about.setVisible (true);
+}
+
+void EditorContent::mouseMove (const juce::MouseEvent& e)
+{
+    setMouseCursor (logoBounds().contains (e.getPosition())
+                        ? juce::MouseCursor::PointingHandCursor
+                        : juce::MouseCursor::NormalCursor);
+}
+
+juce::String EditorContent::getTooltip()
+{
+    return logoBounds().contains (getMouseXYRelative())
+               ? juce::String ("About OpenGlitch: version, credits, license, hidden moves.")
+               : juce::String();
+}
+
+void EditorContent::timerCallback()
 {
     matrix.setPlayheadColumn (processorRef.getCurrentStep());
     matrix.advanceFlashes();
@@ -1199,7 +1513,7 @@ void OpenGlitchAudioProcessorEditor::timerCallback()
                          juce::dontSendNotification);
 }
 
-void OpenGlitchAudioProcessorEditor::paint (juce::Graphics& g)
+void EditorContent::paint (juce::Graphics& g)
 {
     using namespace glitch::palette;
     juce::ColourGradient chassis (juce::Colour (0xff1c2027), 0.0f, 0.0f,
@@ -1230,9 +1544,12 @@ void OpenGlitchAudioProcessorEditor::paint (juce::Graphics& g)
 
     g.setColour (textDim);
     g.setFont (juce::Font (juce::FontOptions (12.0f)));
-    g.drawText (juce::String::fromUTF8 ("a dblue Glitch 1.3 tribute  \xc2\xb7  Pure Data \xe2\x86\x92 hvcc \xe2\x86\x92 JUCE")
-                    + "  |  build " + __DATE__ + " " + __TIME__,
-                22, 40, 520, 16, juce::Justification::centredLeft);
+    g.drawText (juce::String ("v") + OPENGLITCH_VERSION
+                    + juce::String::fromUTF8 ("  \xc2\xb7  dblue Glitch 1.3 tribute  \xc2\xb7  "
+                                              "Pd \xe2\x86\x92 hvcc \xe2\x86\x92 JUCE")
+                    + "  |  build " + __DATE__ + " "
+                    + juce::String (__TIME__).dropLastCharacters (3),
+                22, 40, 446, 16, juce::Justification::centredLeft);
 
     // LCD bezel with a scrolling output-amplitude trace and CRT scanlines
     const auto bezel = lcdLabel.getBounds().toFloat().expanded (4.0f, 3.0f);
@@ -1258,7 +1575,22 @@ void OpenGlitchAudioProcessorEditor::paint (juce::Graphics& g)
     g.drawRoundedRectangle (bezel, 4.0f, 1.0f);
 }
 
-void OpenGlitchAudioProcessorEditor::resized()
+void EditorContent::paintOverChildren (juce::Graphics& g)
+{
+    if (! fileDragActive)
+        return;
+    using namespace glitch::palette;
+    g.setColour (lcd.withAlpha (0.08f));
+    g.fillAll();
+    g.setColour (lcd.withAlpha (0.85f));
+    g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (4.0f), 8.0f, 2.5f);
+    g.setColour (lcd);
+    g.setFont (juce::Font (juce::FontOptions (24.0f)).boldened());
+    g.drawText ("DROP TO LOOP IT THROUGH THE ENGINE", getLocalBounds(),
+                juce::Justification::centred);
+}
+
+void EditorContent::resized()
 {
     const int margin = 18;
     const int headerH = 64;
@@ -1285,4 +1617,59 @@ void OpenGlitchAudioProcessorEditor::resized()
     shiftRightButton.setBounds (lcdX - 66 - 44 - 58 - 32, 20, 28, 26);
     shiftLeftButton.setBounds (lcdX - 66 - 44 - 58 - 32 - 30, 20, 28, 26);
     statusLabel.setBounds (getWidth() - margin - 300, 48, 294, 13);
+
+    // Loop strip lives in the free header band between the logo and buttons.
+    loopOpenButton.setBounds (240, 16, 46, 24);
+    loopPlayButton.setBounds (290, 16, 46, 24);
+    loopNameLabel.setBounds (338, 16, 128, 24);
+
+    about.setBounds (getLocalBounds());
+}
+
+// ---------------------------------------------------------------------------
+// Editor — hosts the content behind a single aspect-locked scale transform
+// ---------------------------------------------------------------------------
+OpenGlitchAudioProcessorEditor::OpenGlitchAudioProcessorEditor (OpenGlitchAudioProcessor& p)
+    : juce::AudioProcessorEditor (&p),
+      processorRef (p),
+      content (p)
+{
+    setLookAndFeel (&lookAndFeel);
+
+    // Read the remembered scale before the resize machinery runs: installing
+    // the limits clamps the still-0x0 bounds, which fires resized() and would
+    // overwrite the stored value with the clamped minimum.
+    const double scale = juce::jlimit (0.5, 2.5,
+        (double) processorRef.apvts.state.getProperty ("editor_scale", 1.0));
+
+    addAndMakeVisible (content);
+    content.setBounds (0, 0, EditorContent::baseWidth, EditorContent::baseHeight);
+
+    // Resize corner + host resizing, locked to the 940x700 aspect, driving
+    // one global scale factor (50%..250%) remembered in the plugin state.
+    setResizable (true, true);
+    setResizeLimits (EditorContent::baseWidth / 2, EditorContent::baseHeight / 2,
+                     EditorContent::baseWidth * 5 / 2, EditorContent::baseHeight * 5 / 2);
+    getConstrainer()->setFixedAspectRatio ((double) EditorContent::baseWidth
+                                           / (double) EditorContent::baseHeight);
+
+    setSize (juce::roundToInt (EditorContent::baseWidth * scale),
+             juce::roundToInt (EditorContent::baseHeight * scale));
+}
+
+OpenGlitchAudioProcessorEditor::~OpenGlitchAudioProcessorEditor()
+{
+    setLookAndFeel (nullptr);
+}
+
+void OpenGlitchAudioProcessorEditor::paint (juce::Graphics& g)
+{
+    g.fillAll (glitch::palette::bg); // only shows in 1px rounding slivers
+}
+
+void OpenGlitchAudioProcessorEditor::resized()
+{
+    const double scale = (double) getWidth() / (double) EditorContent::baseWidth;
+    content.setTransform (juce::AffineTransform::scale ((float) scale));
+    processorRef.apvts.state.setProperty ("editor_scale", scale, nullptr);
 }

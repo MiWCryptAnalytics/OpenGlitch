@@ -4,6 +4,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <set>
 
+#include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include "PluginProcessor.h"
@@ -651,4 +652,107 @@ TEST_CASE ("host: filter sweeps and master volume are audible", "[host][sweep]")
     const float ratio = rms (halved) / rms (in);
     REQUIRE (ratio > 0.4f);
     REQUIRE (ratio < 0.6f);
+}
+
+// ---------------------------------------------------------------------------
+// Standalone loop player (wrapperType_Undefined in tests counts as available,
+// exactly like the standalone build; the hosted VST3 path never sees this).
+// ---------------------------------------------------------------------------
+TEST_CASE ("loop player: dropped file feeds the engine, loops and stops", "[loop]")
+{
+    Harness h (false); // standalone clock
+    REQUIRE (h.proc.loopPlayerAvailable());
+    h.setAllSteps (0.0f); // dry chain: output should be exactly the loop audio path
+
+    // 0.25s of 330Hz sine at 44.1k — the 48k engine also exercises resampling.
+    const auto file = juce::File::createTempFile (".wav");
+    {
+        juce::AudioBuffer<float> tone (2, 11025);
+        for (int i = 0; i < tone.getNumSamples(); ++i)
+        {
+            const float s = 0.5f * std::sin (2.0f * juce::MathConstants<float>::pi
+                                             * 330.0f * (float) i / 44100.0f);
+            tone.setSample (0, i, s);
+            tone.setSample (1, i, s);
+        }
+        juce::WavAudioFormat wav;
+        std::unique_ptr<juce::OutputStream> stream (new juce::FileOutputStream (file));
+        auto writer = wav.createWriterFor (stream, juce::AudioFormatWriterOptions()
+                                                       .withSampleRate (44100.0)
+                                                       .withNumChannels (2)
+                                                       .withBitsPerSample (16));
+        REQUIRE (writer != nullptr);
+        REQUIRE (writer->writeFromAudioSampleBuffer (tone, 0, tone.getNumSamples()));
+    }
+
+    REQUIRE (h.proc.loadLoopFile (file) == juce::String());
+    REQUIRE (h.proc.hasLoopFile());
+    REQUIRE (h.proc.isLoopPlaying()); // loading auto-starts playback
+
+    // Silence in, loop out: after ~1s the 0.25s file has wrapped four times
+    // and the tail block still carries its energy.
+    juce::AudioBuffer<float> silent (2, Harness::BLOCK);
+    juce::MidiBuffer midi;
+    std::vector<float> out;
+    for (int b = 0; b < 94; ++b) // ~1s at 48k/512
+    {
+        silent.clear();
+        h.proc.processBlock (silent, midi);
+        for (int i = 0; i < Harness::BLOCK; ++i)
+            out.push_back (silent.getSample (0, i));
+    }
+    REQUIRE (allFinite (out));
+    REQUIRE (rms (out) > 0.2f);
+    const std::vector<float> tail (out.end() - Harness::BLOCK, out.end());
+    REQUIRE (rms (tail) > 0.2f);
+
+    // Stopping the player returns the input path to silence.
+    h.proc.setLoopPlaying (false);
+    std::vector<float> quiet;
+    for (int b = 0; b < 20; ++b)
+    {
+        silent.clear();
+        h.proc.processBlock (silent, midi);
+        if (b >= 10) // skip declick/envelope flush
+            for (int i = 0; i < Harness::BLOCK; ++i)
+                quiet.push_back (silent.getSample (0, i));
+    }
+    REQUIRE (rms (quiet) < 0.01f);
+
+    file.deleteFile();
+}
+
+TEST_CASE ("loop player: unreadable file reports an error and keeps state", "[loop]")
+{
+    Harness h (false);
+    const auto bogus = juce::File::createTempFile (".wav");
+    bogus.replaceWithText ("not a wav");
+    REQUIRE (h.proc.loadLoopFile (bogus).isNotEmpty());
+    REQUIRE (! h.proc.hasLoopFile());
+    REQUIRE (! h.proc.isLoopPlaying());
+    bogus.deleteFile();
+}
+
+// ---------------------------------------------------------------------------
+// Resizable editor: the scale factor is part of the plugin state.
+// ---------------------------------------------------------------------------
+TEST_CASE ("editor: scale factor round-trips through the state chunk", "[editor][state]")
+{
+    juce::ScopedJuceInitialiser_GUI juceInit;
+
+    juce::MemoryBlock chunk;
+    {
+        OpenGlitchAudioProcessor procA;
+        std::unique_ptr<juce::AudioProcessorEditor> editor (procA.createEditor());
+        REQUIRE (editor->getWidth() == 940); // defaults to 1.0x
+        REQUIRE (editor->getHeight() == 700);
+        editor->setSize (1410, 1050); // the user drags the corner to 1.5x
+        procA.getStateInformation (chunk);
+    }
+
+    OpenGlitchAudioProcessor procB;
+    procB.setStateInformation (chunk.getData(), (int) chunk.getSize());
+    std::unique_ptr<juce::AudioProcessorEditor> editor (procB.createEditor());
+    REQUIRE (editor->getWidth() == 1410);
+    REQUIRE (editor->getHeight() == 1050);
 }
