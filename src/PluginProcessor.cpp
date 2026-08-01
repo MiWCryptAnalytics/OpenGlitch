@@ -191,11 +191,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout OpenGlitchAudioProcessor::cr
 
     const juce::StringArray shapes { "Sine", "Triangle", "Saw", "Square", "Random" };
     const juce::StringArray rates { "1/16", "1/8", "1/4", "1/2", "1 bar", "2 bars", "4 bars" };
-    const juce::StringArray targets1 { "Off", "Filter Freq", "Drive", "Chaos",
-                                       "Mod Freq", "Retrig Pitch", "Gate Duty",
-                                       "Crush Rate", "Crush Drive", "Delay Feedback",
-                                       "Stretch Speed", "TapeStop Speed",
-                                       "Retrig Rate", "Gate Rate", "Crush Bits" };
+    const juce::StringArray targets1 { "Off", "Chaos", "Crush Bits", "Crush Drive",
+                                       "Crush Rate", "Delay Feedback", "Drive",
+                                       "Filter Freq", "Gate Duty", "Gate Rate",
+                                       "Mod Freq", "Retrig Pitch", "Retrig Rate",
+                                       "Stretch Speed", "TapeStop Speed" };
     juce::StringArray targets2 = targets1;
     targets2.addArray ({ "LFO1 Rate", "LFO1 Depth" });
 

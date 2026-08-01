@@ -22,7 +22,7 @@ int main (int argc, char** argv)
     setParam ("lfo1_shape", 0.0f);
     setParam ("lfo1_rate", 4.0f);
     setParam ("lfo1_depth", 0.85f);
-    setParam ("lfo1_target", 1.0f);
+    setParam ("lfo1_target", (float) lfo::filterFreq);
     setParam ("lfo2_shape", 1.0f);
     setParam ("lfo2_rate", 5.0f);
     setParam ("lfo2_depth", 0.6f);

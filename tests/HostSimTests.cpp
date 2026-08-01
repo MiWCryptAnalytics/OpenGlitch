@@ -423,7 +423,7 @@ TEST_CASE ("host: LFO on the filter audibly animates a dry grid", "[host][lfo]")
     Harness h;
     h.playhead.playing = true;
     h.setAllSteps (0.0f);
-    h.setParam ("lfo1_target", 1.0f); // filter freq
+    h.setParam ("lfo1_target", (float) lfo::filterFreq);
     h.setParam ("lfo1_depth", 1.0f);
     h.setParam ("lfo1_rate", 2.0f); // 1/4
     auto out = h.run (1.0);

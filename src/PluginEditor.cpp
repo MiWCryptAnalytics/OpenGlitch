@@ -40,8 +40,8 @@ static const char* effectBlurb (int effectIndex)
         case 2: return "Ring-modulates the input. Slow frequencies tremolo, fast ones turn drums into robot bells.";
         case 3: return "Loops the first slice of the step. Detune the pitch for stutter arpeggios.";
         case 4: return "Swaps this step for a randomly chosen earlier one. Range sets how far back it digs.";
-        case 5: return "Plays the last moments backwards. No knobs - pure time travel.";
-        case 6: return "Decimates the sample rate, then drives the wreckage into a hard clip.";
+        case 5: return "Plays the last moments backwards. Split LEFT and RIGHT for ping-pong reversals.";
+        case 6: return "Decimates the sample rate and bit depth, then drives the wreckage into a hard clip.";
         case 7: return "Chops the step into rhythmic slices. Duty sets the size of the holes.";
         case 8: return "Tempo-synced echo with damped feedback. Time is measured in steps.";
         case 9: return "Drags the step at reduced speed, tape-style. Half speed is an octave down.";
@@ -1030,9 +1030,9 @@ void LfoPanel::drawScope (juce::Graphics& g, juce::Rectangle<float> r) const
     }
 
     // Routing labels
-    static const char* const targetNames[] = { "OFF", "FILTER", "DRIVE", "CHAOS", "MOD",
-                                               "PITCH", "DUTY", "CRUSH", "C.DRIVE", "DLY FB",
-                                               "STRETCH", "TAPE", "R.RATE", "G.RATE", "BITS",
+    static const char* const targetNames[] = { "OFF", "CHAOS", "BITS", "C.DRIVE", "C.RATE",
+                                               "DLY FB", "DRIVE", "FILTER", "DUTY", "G.RATE",
+                                               "MOD", "PITCH", "R.RATE", "STRETCH", "TAPE",
                                                "L1 RATE", "L1 DEPTH" };
     g.setFont (juce::Font (juce::FontOptions (9.5f)).boldened());
     g.setColour (magenta.withAlpha (0.75f));

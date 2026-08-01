@@ -12,9 +12,12 @@ enum Shape { sine = 0, triangle, saw, square, random };
 // Modulation destinations. lfo1Rate/lfo1Depth are only reachable from LFO 2 —
 // that's the derivative, LFO-into-LFO behaviour — and must stay last so
 // "every target below lfo1Rate is a parameter target" holds.
-enum Target { off = 0, filterFreq, drive, chaos, modFreq, retrigPitch, gateDuty,
-              crushRate, crushDrive, delayFeedback, stretchSpeed, tapestopSpeed,
-              retrigRate, gateRate, crushBits,
+// Parameter targets are alphabetical by display name so related effect
+// controls group together in the selector; the choice index must equal the
+// enum value.
+enum Target { off = 0, chaos, crushBits, crushDrive, crushRate, delayFeedback,
+              drive, filterFreq, gateDuty, gateRate, modFreq, retrigPitch,
+              retrigRate, stretchSpeed, tapestopSpeed,
               lfo1Rate, lfo1Depth, numTargets };
 
 // 16th-note steps per LFO cycle, indexed by the rate choice parameter.
