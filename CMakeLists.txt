@@ -36,10 +36,13 @@ find_package(Python3 3.9 REQUIRED COMPONENTS Interpreter)
 set(HVCC_VENV "${CMAKE_BINARY_DIR}/hvcc-venv")
 if(WIN32)
     set(HVCC_BIN "${HVCC_VENV}/Scripts")
+    set(HVCC_EXECUTABLE "${HVCC_BIN}/hvcc.exe")
+    set(HVCC_PYTHON "${HVCC_BIN}/python.exe")
 else()
     set(HVCC_BIN "${HVCC_VENV}/bin")
+    set(HVCC_EXECUTABLE "${HVCC_BIN}/hvcc")
+    set(HVCC_PYTHON "${HVCC_BIN}/python")
 endif()
-set(HVCC_EXECUTABLE "${HVCC_BIN}/hvcc")
 
 if(NOT EXISTS "${HVCC_EXECUTABLE}")
     message(STATUS "Creating hvcc virtualenv: ${HVCC_VENV}")
@@ -54,7 +57,7 @@ if(NOT EXISTS "${HVCC_EXECUTABLE}")
 
     message(STATUS "Installing hvcc from ${hvcc_SOURCE_DIR}")
     execute_process(
-        COMMAND "${HVCC_BIN}/python" -m pip install --quiet "${hvcc_SOURCE_DIR}"
+        COMMAND "${HVCC_PYTHON}" -m pip install --quiet "${hvcc_SOURCE_DIR}"
         RESULT_VARIABLE HVCC_PIP_RESULT
         OUTPUT_VARIABLE HVCC_PIP_OUTPUT
         ERROR_VARIABLE  HVCC_PIP_OUTPUT)
@@ -114,15 +117,28 @@ juce_add_binary_data(OpenGlitchAssets
         assets/fonts/SpaceMono-Bold.ttf)
 
 # ---------------------------------------------------------------------------
-# The plugin itself
+# The plugin itself. Formats per platform: VST3 + Standalone everywhere,
+# AU on macOS, LV2 on Linux.
 # ---------------------------------------------------------------------------
+set(OPENGLITCH_FORMATS VST3 Standalone)
+if(APPLE)
+    list(APPEND OPENGLITCH_FORMATS AU)
+elseif(UNIX)
+    list(APPEND OPENGLITCH_FORMATS LV2)
+endif()
+
+# CI turns this off: runners have no use for plugins in the user folders.
+option(OPENGLITCH_INSTALL_PLUGIN
+    "Copy built plugins into the user's plugin folders after each build" ON)
+
 juce_add_plugin(OpenGlitch
     PRODUCT_NAME "OpenGlitch"
     COMPANY_NAME "OpenGlitch Project"
     BUNDLE_ID com.openglitch.plugin
     PLUGIN_MANUFACTURER_CODE OpGl
     PLUGIN_CODE Oglt
-    FORMATS VST3 Standalone
+    FORMATS ${OPENGLITCH_FORMATS}
+    LV2URI "https://github.com/MiWCryptAnalytics/OpenGlitch"
     VST3_CATEGORIES Fx
     IS_SYNTH FALSE
     # MIDI notes 36..51 switch pattern banks 1..16 live
@@ -131,7 +147,7 @@ juce_add_plugin(OpenGlitch
     IS_MIDI_EFFECT FALSE
     # Auto-installs to the platform plugin folder (~/.vst3 on Linux) so a
     # rebuild is immediately visible to hosts.
-    COPY_PLUGIN_AFTER_BUILD TRUE)
+    COPY_PLUGIN_AFTER_BUILD ${OPENGLITCH_INSTALL_PLUGIN})
 
 target_sources(OpenGlitch PRIVATE
     src/PluginProcessor.cpp
@@ -155,22 +171,51 @@ target_link_libraries(OpenGlitch
 
 # ---------------------------------------------------------------------------
 # Release packaging: stage the built formats and zip them under a versioned
-# name — the same name Phase 5 CI will publish on tags.
+# name — the same name CI publishes on tags.
 #   cmake --build build --target openglitch_package
 # ---------------------------------------------------------------------------
+if(APPLE)
+    set(OPENGLITCH_PACKAGE_OS "macOS")
+else()
+    set(OPENGLITCH_PACKAGE_OS "${CMAKE_SYSTEM_NAME}")
+endif()
+if(APPLE AND CMAKE_OSX_ARCHITECTURES MATCHES ";")
+    set(OPENGLITCH_PACKAGE_ARCH "universal")
+else()
+    set(OPENGLITCH_PACKAGE_ARCH "${CMAKE_SYSTEM_PROCESSOR}")
+endif()
 set(OPENGLITCH_PACKAGE_NAME
-    "OpenGlitch-v${PROJECT_VERSION}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
+    "OpenGlitch-v${PROJECT_VERSION}-${OPENGLITCH_PACKAGE_OS}-${OPENGLITCH_PACKAGE_ARCH}")
 set(OPENGLITCH_PACKAGE_STAGE "${CMAKE_BINARY_DIR}/package/${OPENGLITCH_PACKAGE_NAME}")
+set(OPENGLITCH_ARTEFACTS "${CMAKE_BINARY_DIR}/OpenGlitch_artefacts/$<CONFIG>")
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/package")
-add_custom_target(openglitch_package
+
+set(OPENGLITCH_PACKAGE_COMMANDS
     COMMAND ${CMAKE_COMMAND} -E rm -rf "${OPENGLITCH_PACKAGE_STAGE}"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${OPENGLITCH_PACKAGE_STAGE}"
     COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${CMAKE_BINARY_DIR}/OpenGlitch_artefacts/$<CONFIG>/VST3/OpenGlitch.vst3"
+            "${OPENGLITCH_ARTEFACTS}/VST3/OpenGlitch.vst3"
             "${OPENGLITCH_PACKAGE_STAGE}/OpenGlitch.vst3"
     COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${CMAKE_BINARY_DIR}/OpenGlitch_artefacts/$<CONFIG>/Standalone"
-            "${OPENGLITCH_PACKAGE_STAGE}"
+            "${OPENGLITCH_ARTEFACTS}/Standalone"
+            "${OPENGLITCH_PACKAGE_STAGE}")
+set(OPENGLITCH_PACKAGE_DEPENDS OpenGlitch_VST3 OpenGlitch_Standalone)
+if(APPLE)
+    list(APPEND OPENGLITCH_PACKAGE_COMMANDS
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${OPENGLITCH_ARTEFACTS}/AU/OpenGlitch.component"
+                "${OPENGLITCH_PACKAGE_STAGE}/OpenGlitch.component")
+    list(APPEND OPENGLITCH_PACKAGE_DEPENDS OpenGlitch_AU)
+elseif(UNIX)
+    list(APPEND OPENGLITCH_PACKAGE_COMMANDS
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${OPENGLITCH_ARTEFACTS}/LV2/OpenGlitch.lv2"
+                "${OPENGLITCH_PACKAGE_STAGE}/OpenGlitch.lv2")
+    list(APPEND OPENGLITCH_PACKAGE_DEPENDS OpenGlitch_LV2)
+endif()
+
+add_custom_target(openglitch_package
+    ${OPENGLITCH_PACKAGE_COMMANDS}
     COMMAND ${CMAKE_COMMAND} -E copy
             "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" "${CMAKE_CURRENT_SOURCE_DIR}/README.md"
             "${OPENGLITCH_PACKAGE_STAGE}"
@@ -178,7 +223,7 @@ add_custom_target(openglitch_package
             "${CMAKE_BINARY_DIR}/${OPENGLITCH_PACKAGE_NAME}.zip" --format=zip
             "${OPENGLITCH_PACKAGE_NAME}"
     WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/package"
-    DEPENDS OpenGlitch_VST3 OpenGlitch_Standalone
+    DEPENDS ${OPENGLITCH_PACKAGE_DEPENDS}
     COMMENT "Packaging ${OPENGLITCH_PACKAGE_NAME}.zip")
 
 # ---------------------------------------------------------------------------
@@ -246,7 +291,7 @@ if(OPENGLITCH_BUILD_TESTS)
         JUCE_USE_CURL=0
         OPENGLITCH_VERSION="${PROJECT_VERSION}"
         JUCE_PLUGINHOST_VST3=1 # wrapper tests host the built .vst3 like a DAW
-        OPENGLITCH_VST3_DIR="${CMAKE_BINARY_DIR}/OpenGlitch_artefacts/${CMAKE_BUILD_TYPE}/VST3/OpenGlitch.vst3"
+        OPENGLITCH_VST3_DIR="${CMAKE_BINARY_DIR}/OpenGlitch_artefacts/$<CONFIG>/VST3/OpenGlitch.vst3"
         JUCE_MODAL_LOOPS_PERMITTED=1) # tests pump the message loop to flush async updates
     add_dependencies(OpenGlitchTests OpenGlitch_VST3)
     target_link_libraries(OpenGlitchTests PRIVATE
