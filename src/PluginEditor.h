@@ -118,7 +118,32 @@ private:
     std::vector<std::unique_ptr<Knob>> knobs;
     std::array<std::vector<Knob*>, 10> knobsForEffect;
     juce::Label title, blurb;
+    juce::ComboBox modSyncBox;
+    juce::Label modSyncLabel;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> modSyncAttachment;
     int currentEffect = 3;
+};
+
+// Two tempo-synced LFOs. LFO 2's target list includes LFO 1's rate and depth
+// for cascaded, derivative modulation.
+class LfoPanel : public juce::Component
+{
+public:
+    explicit LfoPanel (juce::AudioProcessorValueTreeState& state);
+
+    void paint (juce::Graphics&) override;
+    void resized() override;
+
+private:
+    struct Column
+    {
+        juce::ComboBox shape, rate, target;
+        juce::Slider depth;
+        std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> shapeAtt,
+            rateAtt, targetAtt;
+        std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> depthAtt;
+    };
+    Column columns[2];
 };
 
 // Right-hand strip: chaos + master chain, and the bypass switch.
@@ -142,6 +167,8 @@ private:
                    const char* name, juce::Colour colour);
 
     std::vector<std::unique_ptr<Fader>> faders;
+    juce::ComboBox filterTypeBox;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> filterTypeAttachment;
     juce::TextButton bypassButton { "BYPASS" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> bypassAttachment;
 };
@@ -165,9 +192,11 @@ private:
     StepMatrix matrix;
     SequencerBar sequencerBar;
     EffectPanel effectPanel;
+    LfoPanel lfoPanel;
     MasterPanel masterPanel;
     juce::Label lcdLabel;
     juce::TextButton clearButton { "CLEAR" };
+    juce::TextButton diceButton { "DICE" };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (OpenGlitchAudioProcessorEditor)
 };

@@ -59,6 +59,14 @@ OpenGlitchLookAndFeel::OpenGlitchLookAndFeel()
     setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xffe53935));
     setColour (juce::TextButton::textColourOffId, textDim);
     setColour (juce::TextButton::textColourOnId, juce::Colours::white);
+    setColour (juce::ComboBox::backgroundColourId, juce::Colour (0xff262b33));
+    setColour (juce::ComboBox::textColourId, text);
+    setColour (juce::ComboBox::outlineColourId, cellStroke);
+    setColour (juce::ComboBox::arrowColourId, textDim);
+    setColour (juce::PopupMenu::backgroundColourId, panel);
+    setColour (juce::PopupMenu::textColourId, text);
+    setColour (juce::PopupMenu::highlightedBackgroundColourId, juce::Colour (0xffffb300));
+    setColour (juce::PopupMenu::highlightedTextColourId, bg);
 }
 
 void OpenGlitchLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int width, int height,
@@ -458,6 +466,21 @@ EffectPanel::EffectPanel (juce::AudioProcessorValueTreeState& state)
                           addKnob (state, "fx_delay_feedback", "FEEDBACK") };
     knobsForEffect[9] = { addKnob (state, "fx_stretch_speed", "SPEED") };
 
+    // The modulator gets a tempo-sync selector next to its frequency knob.
+    if (auto* syncParam = dynamic_cast<juce::AudioParameterChoice*> (
+            state.getParameter ("fx_mod_sync")))
+    {
+        modSyncBox.addItemList (syncParam->choices, 1);
+        addChildComponent (modSyncBox);
+        modSyncLabel.setText ("SYNC", juce::dontSendNotification);
+        modSyncLabel.setFont (juce::Font (juce::FontOptions (12.0f)).boldened());
+        modSyncLabel.setColour (juce::Label::textColourId, glitch::palette::textDim);
+        modSyncLabel.setJustificationType (juce::Justification::centred);
+        addChildComponent (modSyncLabel);
+        modSyncAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
+            state, "fx_mod_sync", modSyncBox);
+    }
+
     setEffect (3);
 }
 
@@ -503,6 +526,8 @@ void EffectPanel::setEffect (int effectIndex)
         knob->slider.setVisible (true);
         knob->nameLabel.setVisible (true);
     }
+    modSyncBox.setVisible (currentEffect == 2);
+    modSyncLabel.setVisible (currentEffect == 2);
 
     resized();
     repaint();
@@ -511,17 +536,20 @@ void EffectPanel::setEffect (int effectIndex)
 void EffectPanel::resized()
 {
     title.setBounds (14, 8, 220, 24);
-    blurb.setBounds (14, 32, getWidth() - 28, 18);
+    blurb.setFont (juce::Font (juce::FontOptions (12.0f)));
+    blurb.setBounds (14, 30, getWidth() - 28, 30);
 
     int x = 10;
-    const int knobW = 96;
-    const int top = 56;
+    const int knobW = 92;
+    const int top = 62;
     for (auto* knob : knobsForEffect[(size_t) currentEffect])
     {
         knob->nameLabel.setBounds (x, top, knobW, 14);
         knob->slider.setBounds (x, top + 14, knobW, getHeight() - top - 20);
-        x += knobW + 6;
+        x += knobW + 4;
     }
+    modSyncLabel.setBounds (x + 6, top, 90, 14);
+    modSyncBox.setBounds (x + 6, top + 20, 90, 22);
 }
 
 void EffectPanel::paint (juce::Graphics& g)
@@ -537,6 +565,74 @@ void EffectPanel::paint (juce::Graphics& g)
 }
 
 // ---------------------------------------------------------------------------
+// LfoPanel
+// ---------------------------------------------------------------------------
+LfoPanel::LfoPanel (juce::AudioProcessorValueTreeState& state)
+{
+    for (int n = 0; n < 2; ++n)
+    {
+        auto& col = columns[n];
+        const auto id = [n] (const char* s) { return "lfo" + juce::String (n + 1) + "_" + s; };
+
+        auto setupBox = [&] (juce::ComboBox& box, const char* param,
+                             std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>& att)
+        {
+            if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (
+                    state.getParameter (id (param))))
+            {
+                box.addItemList (choice->choices, 1);
+                addAndMakeVisible (box);
+                att = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
+                    state, id (param), box);
+            }
+        };
+        setupBox (col.shape, "shape", col.shapeAtt);
+        setupBox (col.rate, "rate", col.rateAtt);
+        setupBox (col.target, "target", col.targetAtt);
+
+        col.depth.setSliderStyle (juce::Slider::LinearHorizontal);
+        col.depth.setTextBoxStyle (juce::Slider::TextBoxRight, false, 44, 15);
+        col.depth.setColour (juce::Slider::rotarySliderFillColourId,
+                             n == 0 ? juce::Colour (0xffe040fb) : juce::Colour (0xff4fc3f7));
+        addAndMakeVisible (col.depth);
+        col.depthAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+            state, id ("depth"), col.depth);
+    }
+}
+
+void LfoPanel::resized()
+{
+    const int colW = (getWidth() - 24) / 2;
+    for (int n = 0; n < 2; ++n)
+    {
+        auto& col = columns[n];
+        const int x = 8 + n * (colW + 8);
+        col.shape.setBounds (x, 28, colW, 21);
+        col.rate.setBounds (x, 53, colW, 21);
+        col.target.setBounds (x, 78, colW, 21);
+        col.depth.setBounds (x, 103, colW, 24);
+    }
+}
+
+void LfoPanel::paint (juce::Graphics& g)
+{
+    using namespace glitch::palette;
+    auto bounds = getLocalBounds().toFloat();
+    g.setColour (panel);
+    g.fillRoundedRectangle (bounds, 6.0f);
+    g.setColour (cellStroke);
+    g.drawRoundedRectangle (bounds.reduced (0.5f), 6.0f, 1.0f);
+
+    const int colW = (getWidth() - 24) / 2;
+    g.setFont (juce::Font (juce::FontOptions (13.0f)).boldened());
+    g.setColour (juce::Colour (0xffe040fb));
+    g.drawText ("LFO 1", 8, 6, colW, 18, juce::Justification::centredLeft);
+    g.setColour (juce::Colour (0xff4fc3f7));
+    g.drawText (juce::String::fromUTF8 ("LFO 2 \xe2\x80\x94 can drive LFO 1"),
+                16 + colW, 6, colW + 60, 18, juce::Justification::centredLeft);
+}
+
+// ---------------------------------------------------------------------------
 // MasterPanel
 // ---------------------------------------------------------------------------
 MasterPanel::MasterPanel (juce::AudioProcessorValueTreeState& state)
@@ -545,6 +641,15 @@ MasterPanel::MasterPanel (juce::AudioProcessorValueTreeState& state)
     addFader (state, "master_drive", "DRIVE", juce::Colour (0xffff7043));
     addFader (state, "master_lowpass", "FILTER", juce::Colour (0xff4fc3f7));
     addFader (state, "master_mix", "MIX", glitch::palette::lcd);
+
+    if (auto* typeParam = dynamic_cast<juce::AudioParameterChoice*> (
+            state.getParameter ("master_filter_type")))
+    {
+        filterTypeBox.addItemList (typeParam->choices, 1);
+        addAndMakeVisible (filterTypeBox);
+        filterTypeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
+            state, "master_filter_type", filterTypeBox);
+    }
 
     bypassButton.setClickingTogglesState (true);
     addAndMakeVisible (bypassButton);
@@ -578,13 +683,16 @@ void MasterPanel::resized()
 {
     const int top = 26;
     const int bypassH = 32;
+    const int comboH = 24;
     const int faderW = getWidth() / (int) faders.size();
+    const int faderBottom = getHeight() - bypassH - comboH - 20;
     for (size_t i = 0; i < faders.size(); ++i)
     {
         const int x = (int) i * faderW;
         faders[i]->nameLabel.setBounds (x, top, faderW, 14);
-        faders[i]->slider.setBounds (x, top + 16, faderW, getHeight() - top - 16 - bypassH - 14);
+        faders[i]->slider.setBounds (x, top + 16, faderW, faderBottom - top - 16);
     }
+    filterTypeBox.setBounds (10, getHeight() - bypassH - comboH - 12, getWidth() - 20, comboH);
     bypassButton.setBounds (10, getHeight() - bypassH - 8, getWidth() - 20, bypassH);
 }
 
@@ -610,6 +718,7 @@ OpenGlitchAudioProcessorEditor::OpenGlitchAudioProcessorEditor (OpenGlitchAudioP
       matrix (p.apvts),
       sequencerBar (p),
       effectPanel (p.apvts),
+      lfoPanel (p.apvts),
       masterPanel (p.apvts)
 {
     setLookAndFeel (&lookAndFeel);
@@ -617,6 +726,7 @@ OpenGlitchAudioProcessorEditor::OpenGlitchAudioProcessorEditor (OpenGlitchAudioP
     addAndMakeVisible (matrix);
     addAndMakeVisible (sequencerBar);
     addAndMakeVisible (effectPanel);
+    addAndMakeVisible (lfoPanel);
     addAndMakeVisible (masterPanel);
 
     matrix.onEffectTouched = [this] (int fx) { effectPanel.setEffect (fx); };
@@ -629,6 +739,8 @@ OpenGlitchAudioProcessorEditor::OpenGlitchAudioProcessorEditor (OpenGlitchAudioP
 
     clearButton.onClick = [this] { matrix.clearAll(); };
     addAndMakeVisible (clearButton);
+    diceButton.onClick = [this] { processorRef.randomizeActivePattern(); };
+    addAndMakeVisible (diceButton);
 
     startTimerHz (30);
     timerCallback(); // seed the LCD before the first tick
@@ -696,9 +808,12 @@ void OpenGlitchAudioProcessorEditor::resized()
 
     sequencerBar.setBounds (margin, matrix.getBottom() + 8, matrixRight - margin, 30);
 
-    effectPanel.setBounds (margin, sequencerBar.getBottom() + 8, matrixRight - margin,
-                           getHeight() - sequencerBar.getBottom() - 8 - margin);
+    const int bottomY = sequencerBar.getBottom() + 8;
+    const int bottomH = getHeight() - bottomY - margin;
+    effectPanel.setBounds (margin, bottomY, 380, bottomH);
+    lfoPanel.setBounds (margin + 390, bottomY, matrixRight - margin - 390, bottomH);
 
     lcdLabel.setBounds (getWidth() - margin - 220, 20, 214, 26);
     clearButton.setBounds (getWidth() - margin - 220 - 78, 20, 64, 26);
+    diceButton.setBounds (getWidth() - margin - 220 - 78 - 72, 20, 64, 26);
 }

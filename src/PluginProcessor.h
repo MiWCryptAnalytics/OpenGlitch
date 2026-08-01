@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "Heavy_OpenGlitch.h"
+#include "LfoEngine.h"
 
 class OpenGlitchAudioProcessor : public juce::AudioProcessor,
                                  private juce::AudioProcessorValueTreeState::Listener,
@@ -52,6 +53,7 @@ public:
     static constexpr int numPatterns = 8;
     int getActivePattern() const noexcept { return activeSlot; }
     void copyActivePatternTo (int slot); // message thread only (shift-click in the UI)
+    void randomizeActivePattern();       // message thread only (the DICE button)
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
@@ -97,8 +99,18 @@ private:
         hv_uint32_t hash;
         std::atomic<float>* value;
         float lastSent;
+        int modTarget = lfo::off; // lfo::Target this receiver can be modulated by
     };
     std::vector<ParamLink> paramLinks;
+
+    // LFO engine (audio thread only). Contributions are rebuilt every block
+    // and folded into the values pushed to Heavy.
+    void updateLfos (int numSamples);
+    lfo::State lfoStates[2];
+    juce::Random lfoRng;
+    float modContrib[lfo::numTargets] = {};
+    std::atomic<float>* lfoRaw[2][4] = {}; // [lfo][shape, rate, depth, target]
+    std::atomic<float>* modSyncRaw = nullptr;
 
     juce::AudioParameterBool* bypassParam = nullptr;
 

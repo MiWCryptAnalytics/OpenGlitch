@@ -23,6 +23,16 @@ Feature complete for 1.0:
 - **Swing** (0–100%) — sample-accurately scheduled in hosted mode, delayed
   odd-step firing in the standalone clock.
 - **Mono tracks supported** (mono in is duplicated, mono out averaged).
+- **DICE** — one click fills the active pattern with a random (musically
+  weighted) grid; CLEAR empties it.
+- **Multimode master filter** — Lowpass / Highpass / Bandpass selector under
+  the master faders (bandpass is a hip~/lop~ series pair).
+- **Tempo-synced ring modulator** — a SYNC selector on the Modulator panel
+  locks its frequency to divisions from 1/16 to a full bar.
+- **Two tempo-synced LFOs** (sine/tri/saw/square/S&H random, 1/16 to 4 bars,
+  ppq-locked to the DAW bar). Targets: filter freq, drive, chaos, mod freq,
+  retrigger pitch, gate duty — and LFO 2 can instead drive **LFO 1's rate or
+  depth** for cascaded, derivative modulation.
 
 Phase 4 — full custom GUI. The editor recreates the Glitch matrix: 9 effect
 rows x 16 step columns. Click a cell to assign the effect, click again to

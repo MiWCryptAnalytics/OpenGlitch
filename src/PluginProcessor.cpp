@@ -100,13 +100,47 @@ juce::AudioProcessorValueTreeState::ParameterLayout OpenGlitchAudioProcessor::cr
 
     auto master = std::make_unique<juce::AudioProcessorParameterGroup> ("master", "Master", "|");
     master->addChild (makeFloat ("master_drive", "Drive", 1.0f, 10.0f, 1.0f, 0.0f, "x"));
-    master->addChild (makeHz ("master_lowpass", "Lowpass", 100.0f, 20000.0f, 20000.0f, 2000.0f));
+    master->addChild (makeHz ("master_lowpass", "Filter Freq", 100.0f, 20000.0f, 20000.0f, 2000.0f));
+    master->addChild (std::make_unique<juce::AudioParameterChoice> (
+        juce::ParameterID ("master_filter_type", 1), "Filter Type",
+        juce::StringArray { "Lowpass", "Highpass", "Bandpass" }, 0));
     master->addChild (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID ("master_mix", 1), "Mix",
         juce::NormalisableRange<float> (0.0f, 1.0f), 1.0f, percentAttributes()));
     master->addChild (std::make_unique<juce::AudioParameterBool> (
         juce::ParameterID ("bypass", 1), "Bypass", false));
     layout.add (std::move (master));
+
+    // Modulation: tempo-sync for the ring modulator, and two LFOs. LFO 2 can
+    // target LFO 1's rate or depth for derivative, LFO-into-LFO motion.
+    auto modulation = std::make_unique<juce::AudioProcessorParameterGroup> ("modulation", "Modulation", "|");
+    modulation->addChild (std::make_unique<juce::AudioParameterChoice> (
+        juce::ParameterID ("fx_mod_sync", 1), "Mod Sync",
+        juce::StringArray { "Free", "1/16", "1/8", "1/4", "1/2", "1 bar" }, 0));
+
+    const juce::StringArray shapes { "Sine", "Triangle", "Saw", "Square", "Random" };
+    const juce::StringArray rates { "1/16", "1/8", "1/4", "1/2", "1 bar", "2 bars", "4 bars" };
+    const juce::StringArray targets1 { "Off", "Filter Freq", "Drive", "Chaos",
+                                       "Mod Freq", "Retrig Pitch", "Gate Duty" };
+    juce::StringArray targets2 = targets1;
+    targets2.addArray ({ "LFO1 Rate", "LFO1 Depth" });
+
+    for (int n = 1; n <= 2; ++n)
+    {
+        const auto id = [n] (const char* s) { return "lfo" + juce::String (n) + "_" + s; };
+        const auto nm = [n] (const char* s) { return "LFO " + juce::String (n) + " " + s; };
+        modulation->addChild (std::make_unique<juce::AudioParameterChoice> (
+            juce::ParameterID (id ("shape"), 1), nm ("Shape"), shapes, 0));
+        modulation->addChild (std::make_unique<juce::AudioParameterChoice> (
+            juce::ParameterID (id ("rate"), 1), nm ("Rate"), rates, 4));
+        modulation->addChild (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID (id ("depth"), 1), nm ("Depth"),
+            juce::NormalisableRange<float> (0.0f, 1.0f), 0.0f, percentAttributes()));
+        modulation->addChild (std::make_unique<juce::AudioParameterChoice> (
+            juce::ParameterID (id ("target"), 1), nm ("Target"),
+            n == 1 ? targets1 : targets2, 0));
+    }
+    layout.add (std::move (modulation));
 
     return layout;
 }
@@ -127,7 +161,7 @@ OpenGlitchAudioProcessor::OpenGlitchAudioProcessor()
         "fx_tapestop_speed", "fx_mod_freq", "fx_retrigger_rate", "fx_retrigger_pitch",
         "fx_shuffle_range", "fx_crush_rate", "fx_crush_drive", "fx_gate_rate", "fx_gate_duty",
         "fx_delay_div", "fx_delay_feedback", "fx_stretch_speed",
-        "master_drive", "master_lowpass", "master_mix", "bypass"
+        "master_drive", "master_lowpass", "master_filter_type", "master_mix", "bypass"
     };
 
     for (auto* id : linkedIds)
@@ -136,6 +170,23 @@ OpenGlitchAudioProcessor::OpenGlitchAudioProcessor()
         jassert (raw != nullptr); // parameter ID must match the Pd receiver name
         paramLinks.push_back ({ hv_stringToHash (id), raw, std::numeric_limits<float>::quiet_NaN() });
     }
+
+    // LFO wiring: which pushed receivers can be modulated, and the LFO params.
+    static const std::pair<const char*, int> modTargets[] = {
+        { "master_lowpass", lfo::filterFreq }, { "master_drive", lfo::drive },
+        { "seq_chaos", lfo::chaos },           { "fx_mod_freq", lfo::modFreq },
+        { "fx_retrigger_pitch", lfo::retrigPitch }, { "fx_gate_duty", lfo::gateDuty },
+    };
+    for (auto& link : paramLinks)
+        for (const auto& [id, target] : modTargets)
+            if (link.hash == hv_stringToHash (id))
+                link.modTarget = target;
+
+    static const char* const lfoIds[] = { "shape", "rate", "depth", "target" };
+    for (int n = 0; n < 2; ++n)
+        for (int i = 0; i < 4; ++i)
+            lfoRaw[n][i] = apvts.getRawParameterValue ("lfo" + juce::String (n + 1) + "_" + lfoIds[i]);
+    modSyncRaw = apvts.getRawParameterValue ("fx_mod_sync");
 
     // Pattern system wiring
     patternParam = dynamic_cast<juce::AudioParameterChoice*> (apvts.getParameter ("pattern_select"));
@@ -204,6 +255,19 @@ void OpenGlitchAudioProcessor::loadPattern (int slot)
     }
     lengthParam->setValueNotifyingHost (
         lengthParam->convertTo0to1 ((float) (int) pattern.getProperty ("length", 16)));
+}
+
+void OpenGlitchAudioProcessor::randomizeActivePattern()
+{
+    auto& rng = juce::Random::getSystemRandom();
+    const juce::ScopedValueSetter<bool> loading (loadingPattern, true);
+    for (auto* p : stepParams)
+    {
+        // ~45% rests keep it musical; the rest is any of the nine effects.
+        const int effect = rng.nextFloat() < 0.45f ? 0 : rng.nextInt ({ 1, 10 });
+        p->setValueNotifyingHost (p->convertTo0to1 ((float) effect));
+    }
+    storePattern (activeSlot);
 }
 
 void OpenGlitchAudioProcessor::copyActivePatternTo (int slot)
@@ -325,11 +389,86 @@ void OpenGlitchAudioProcessor::heavySendHook (HeavyContextInterface* context, co
             self->playheadStep.store ((int) hv_msg_getFloat (msg, 0), std::memory_order_relaxed);
 }
 
+void OpenGlitchAudioProcessor::updateLfos (int numSamples)
+{
+    std::fill (std::begin (modContrib), std::end (modContrib), 0.0f);
+
+    const double sr = getSampleRate();
+    if (sr <= 0.0)
+        return;
+
+    double bpm = (double) displayBpm.load (std::memory_order_relaxed);
+    double ppq = 0.0;
+    bool hosted = false, playing = false;
+    if (auto* hostPlayHead = getPlayHead())
+    {
+        if (auto pos = hostPlayHead->getPosition())
+        {
+            bpm = pos->getBpm().orFallback (120.0);
+            playing = pos->getIsPlaying();
+            if (auto p = pos->getPpqPosition())
+            {
+                hosted = true;
+                ppq = *p;
+            }
+        }
+    }
+
+    const double blockSeconds = (double) numSamples / sr;
+    const double sixteenthHz = bpm * 4.0 / 60.0;
+    const bool lock = hosted && playing; // ppq-lock keeps synced LFOs bar-aligned
+    auto nextRandom = [this] { return lfoRng.nextDouble() * 2.0 - 1.0; };
+    auto intOf = [] (std::atomic<float>* raw) { return (int) std::lround (raw->load()); };
+
+    // LFO 2 first: its output may steer LFO 1 (the derivative behaviour).
+    const double steps2 = lfo::stepsPerCycle (intOf (lfoRaw[1][1]));
+    const double v2 = lfo::advance (lfoStates[1], intOf (lfoRaw[1][0]), sixteenthHz / steps2,
+                                    (double) lfoRaw[1][2]->load(), blockSeconds,
+                                    lock, ppq * 4.0 / steps2, nextRandom);
+
+    const int target2 = intOf (lfoRaw[1][3]);
+    double rateFactor = 1.0, depthScale = 1.0;
+    if (target2 == lfo::lfo1Rate)
+        rateFactor = std::exp2 (2.0 * v2); // +/- 2 octaves of LFO-rate FM
+    else if (target2 == lfo::lfo1Depth)
+        depthScale = std::clamp (1.0 + v2, 0.0, 2.0);
+    else if (target2 > lfo::off && target2 < lfo::lfo1Rate)
+        modContrib[target2] += (float) v2;
+
+    const double steps1 = lfo::stepsPerCycle (intOf (lfoRaw[0][1]));
+    const double depth1 = std::clamp ((double) lfoRaw[0][2]->load() * depthScale, 0.0, 1.0);
+    const double v1 = lfo::advance (lfoStates[0], intOf (lfoRaw[0][0]),
+                                    sixteenthHz / steps1 * rateFactor, depth1, blockSeconds,
+                                    lock && juce::exactlyEqual (rateFactor, 1.0),
+                                    ppq * 4.0 / steps1, nextRandom);
+
+    const int target1 = intOf (lfoRaw[0][3]);
+    if (target1 > lfo::off && target1 < lfo::lfo1Rate)
+        modContrib[target1] += (float) v1;
+}
+
 void OpenGlitchAudioProcessor::pushChangedParameters()
 {
     for (auto& link : paramLinks)
     {
-        const float v = link.value->load (std::memory_order_relaxed);
+        float v = link.value->load (std::memory_order_relaxed);
+
+        // Tempo-synced ring modulator: the Hz knob is replaced by a musical
+        // division of the current tempo.
+        if (link.modTarget == lfo::modFreq)
+        {
+            const int sync = (int) std::lround (modSyncRaw->load());
+            if (sync > 0)
+            {
+                static const float syncSteps[] = { 0.0f, 1.0f, 2.0f, 4.0f, 8.0f, 16.0f };
+                const float stepMs = 15000.0f / juce::jmax (1.0f, displayBpm.load());
+                v = 1000.0f / (stepMs * syncSteps[sync]);
+            }
+        }
+
+        if (link.modTarget != lfo::off)
+            v = lfo::applyMod (link.modTarget, v, (double) modContrib[link.modTarget]);
+
         if (! juce::exactlyEqual (v, link.lastSent)) // NaN sentinel compares unequal, forcing the first send
         {
             // Only mark as sent if the queue accepted it, so a full queue
@@ -449,6 +588,7 @@ void OpenGlitchAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         }
     }
 
+    updateLfos (buffer.getNumSamples());
     pushChangedParameters();
     pushTransport (buffer.getNumSamples());
 
