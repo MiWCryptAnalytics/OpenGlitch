@@ -19,11 +19,13 @@ struct FakePlayHead : juce::AudioPlayHead
 {
     double bpm = 120.0, ppq = 0.0;
     bool playing = false;
+    bool provideBpm = true; // some hosts omit tempo from the process context
 
     juce::Optional<juce::AudioPlayHead::PositionInfo> getPosition() const override
     {
         juce::AudioPlayHead::PositionInfo info;
-        info.setBpm (bpm);
+        if (provideBpm)
+            info.setBpm (bpm);
         info.setIsPlaying (playing);
         info.setPpqPosition (ppq);
         return info;
@@ -37,17 +39,20 @@ struct Harness
     juce::ScopedJuceInitialiser_GUI juceInit;
     OpenGlitchAudioProcessor proc;
     FakePlayHead playhead;
-    juce::AudioBuffer<float> buffer { 2, BLOCK };
+    juce::AudioBuffer<float> buffer;
     juce::MidiBuffer midi;
     int sampleIndex = 0;
+    int numIn, numOut;
 
-    explicit Harness (bool hosted = true)
+    explicit Harness (bool hosted = true, int numInputs = 2, int numOutputs = 2)
+        : buffer (juce::jmax (numInputs, numOutputs), BLOCK),
+          numIn (numInputs), numOut (numOutputs)
     {
         if (hosted)
             proc.setPlayHead (&playhead);
         // Real hosts set the play config before preparing; skipping this left
         // getSampleRate() at 0 and once unbounded the transport tick loop.
-        proc.setPlayConfigDetails (2, 2, (double) SR, BLOCK);
+        proc.setPlayConfigDetails (numIn, numOut, (double) SR, BLOCK);
         proc.prepareToPlay ((double) SR, BLOCK);
     }
 
@@ -64,43 +69,46 @@ struct Harness
             setParam ("step_" + juce::String (i), v);
     }
 
-    // Feeds a deterministic square-ish 220Hz tone (rich in harmonics so
-    // filters are audible); returns interleaved output, optionally input.
+    // Processes one block of `size` samples of the deterministic square-ish
+    // 220Hz test tone, appending channel-0/1 data to the given vectors.
+    void processOne (int size, std::vector<float>& out, std::vector<float>& in)
+    {
+        for (int i = 0; i < size; ++i, ++sampleIndex)
+        {
+            const float s = std::sin (2.0f * juce::MathConstants<float>::pi
+                                      * 220.0f * (float) sampleIndex / SR);
+            const float v = 0.4f * (s > 0.0f ? 1.0f : -1.0f) + 0.1f * s;
+            for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                buffer.setSample (ch, i, ch == 0 ? v : -v);
+        }
+        juce::AudioBuffer<float> slice (buffer.getArrayOfWritePointers(),
+                                        buffer.getNumChannels(), size);
+        for (int i = 0; i < size; ++i)
+        {
+            in.push_back (slice.getSample (0, i));
+            in.push_back (slice.getSample (juce::jmin (1, numOut - 1, slice.getNumChannels() - 1), i));
+        }
+
+        proc.processBlock (slice, midi);
+        midi.clear();
+
+        for (int i = 0; i < size; ++i)
+        {
+            out.push_back (slice.getSample (0, i));
+            out.push_back (slice.getSample (juce::jmin (1, numOut - 1, slice.getNumChannels() - 1), i));
+        }
+
+        if (playhead.playing)
+            playhead.ppq += (double) size / SR * playhead.bpm / 60.0;
+    }
+
+    // Feeds whole BLOCK-sized buffers for `seconds`.
     std::vector<float> run (double seconds, std::vector<float>* inputOut = nullptr)
     {
         const int blocks = (int) (seconds * SR / BLOCK);
         std::vector<float> out, in;
-        out.reserve ((size_t) blocks * BLOCK * 2);
-        in.reserve ((size_t) blocks * BLOCK * 2);
-
         for (int b = 0; b < blocks; ++b)
-        {
-            for (int i = 0; i < BLOCK; ++i, ++sampleIndex)
-            {
-                const float s = std::sin (2.0f * juce::MathConstants<float>::pi
-                                          * 220.0f * (float) sampleIndex / SR);
-                const float v = 0.4f * (s > 0.0f ? 1.0f : -1.0f) + 0.1f * s;
-                buffer.setSample (0, i, v);
-                buffer.setSample (1, i, -v);
-            }
-            for (int i = 0; i < BLOCK; ++i)
-            {
-                in.push_back (buffer.getSample (0, i));
-                in.push_back (buffer.getSample (1, i));
-            }
-
-            proc.processBlock (buffer, midi);
-            midi.clear();
-
-            for (int i = 0; i < BLOCK; ++i)
-            {
-                out.push_back (buffer.getSample (0, i));
-                out.push_back (buffer.getSample (1, i));
-            }
-
-            if (playhead.playing)
-                playhead.ppq += (double) BLOCK / SR * playhead.bpm / 60.0;
-        }
+            processOne (BLOCK, out, in);
         if (inputOut != nullptr)
             *inputOut = in;
         return out;
@@ -199,6 +207,104 @@ TEST_CASE ("host: highpass mode thins the tone through the processor", "[host][f
     REQUIRE (rms (out) < rms (in) * 0.5f);
 }
 
+TEST_CASE ("host: mono track (mono in, mono out) still glitches", "[host][buses]")
+{
+    Harness h (true, 1, 1);
+    h.playhead.playing = true;
+    std::vector<float> in;
+    auto out = h.run (2.0, &in);
+    REQUIRE (allFinite (out));
+    REQUIRE (maxDiff (out, in) > 0.05f);
+}
+
+TEST_CASE ("host: mono in to stereo out still glitches", "[host][buses]")
+{
+    Harness h (true, 1, 2);
+    h.playhead.playing = true;
+    std::vector<float> in;
+    auto out = h.run (2.0, &in);
+    REQUIRE (allFinite (out));
+    REQUIRE (maxDiff (out, in) > 0.05f);
+}
+
+TEST_CASE ("host: Ardour lifecycle - processes stopped first, then rolls", "[host][transport]")
+{
+    Harness h;
+    h.run (1.0); // DAWs process constantly; stopped must be clean dry
+    std::vector<float> inStopped;
+    auto stopped = h.run (0.5, &inStopped);
+    REQUIRE (maxDiff (stopped, inStopped) < 0.2f);
+    REQUIRE (h.proc.getTransportMode() == OpenGlitchAudioProcessor::hostedStopped);
+
+    h.playhead.playing = true;
+    std::vector<float> in;
+    auto out = h.run (2.0, &in);
+    REQUIRE (maxDiff (out, in) > 0.05f);
+    REQUIRE (h.proc.getTransportMode() == OpenGlitchAudioProcessor::hostedPlaying);
+    REQUIRE (h.proc.getTickCount() > 0);
+}
+
+TEST_CASE ("host: irregular block splits keep the groove", "[host][transport]")
+{
+    Harness h;
+    h.playhead.playing = true;
+    // Hosts split buffers at automation points and loop edges - including
+    // sizes that are not multiples of Heavy's 8-sample SIMD block.
+    const int sizes[] = { 512, 96, 40, 256, 12, 480, 128, 4 };
+    std::vector<float> out, in;
+    int total = 0;
+    for (int i = 0; total < Harness::SR * 2; ++i)
+    {
+        const int size = sizes[i % 8];
+        h.processOne (size, out, in);
+        total += size;
+    }
+    REQUIRE (allFinite (out));
+    REQUIRE (maxDiff (out, in) > 0.05f);
+}
+
+TEST_CASE ("host: session starting mid-timeline still locks", "[host][transport]")
+{
+    Harness h;
+    h.playhead.playing = true;
+    h.playhead.ppq = 12345.0; // deep into a long session
+    std::vector<float> in;
+    auto out = h.run (2.0, &in);
+    REQUIRE (maxDiff (out, in) > 0.05f);
+    REQUIRE (h.proc.getCurrentStep() >= 0);
+    REQUIRE (h.proc.getCurrentStep() <= 15);
+}
+
+TEST_CASE ("host: missing tempo info falls back to 120 and still glitches", "[host][transport]")
+{
+    Harness h;
+    h.playhead.provideBpm = false;
+    h.playhead.playing = true;
+    std::vector<float> in;
+    auto out = h.run (2.0, &in);
+    REQUIRE (allFinite (out));
+    REQUIRE (maxDiff (out, in) > 0.05f);
+}
+
+TEST_CASE ("host: bypass engages and releases cleanly mid-playback", "[host][transport]")
+{
+    Harness h;
+    h.playhead.playing = true;
+    h.run (1.0);
+
+    h.setParam ("bypass", 1.0f);
+    h.run (0.3);
+    std::vector<float> inBypassed;
+    auto bypassed = h.run (0.5, &inBypassed);
+    REQUIRE (maxDiff (bypassed, inBypassed) < 1e-6f);
+
+    h.setParam ("bypass", 0.0f);
+    h.run (0.3);
+    std::vector<float> in;
+    auto out = h.run (2.0, &in);
+    REQUIRE (maxDiff (out, in) > 0.05f); // effects come back
+}
+
 // Flush the pattern system's async updater the way a DAW's message loop would.
 static void pumpMessages (int ms = 60)
 {
@@ -264,7 +370,7 @@ TEST_CASE ("host: switching pattern slots changes the audible grid", "[host][pat
     pumpMessages();
     REQUIRE (h.proc.getActivePattern() == 0);
     for (int i = 1; i <= 16; ++i)
-        REQUIRE (h.proc.apvts.getRawParameterValue ("step_" + juce::String (i))->load() == 0.0f);
+        REQUIRE (juce::exactlyEqual (h.proc.apvts.getRawParameterValue ("step_" + juce::String (i))->load(), 0.0f));
 
     h.run (0.4);
     std::vector<float> inA;
@@ -274,7 +380,7 @@ TEST_CASE ("host: switching pattern slots changes the audible grid", "[host][pat
     h.setParam ("pattern_select", 1.0f);
     pumpMessages();
     for (int i = 1; i <= 16; ++i)
-        REQUIRE (h.proc.apvts.getRawParameterValue ("step_" + juce::String (i))->load() == 7.0f);
+        REQUIRE (juce::exactlyEqual (h.proc.apvts.getRawParameterValue ("step_" + juce::String (i))->load(), 7.0f));
     h.run (0.2);
     std::vector<float> inB;
     auto outB = h.run (1.0, &inB);
@@ -297,7 +403,7 @@ TEST_CASE ("host: cleared grid survives a state save/load round-trip", "[host][p
     h2.proc.setStateInformation (blob.getData(), (int) blob.getSize());
     pumpMessages();
     for (int i = 1; i <= 16; ++i)
-        REQUIRE (h2.proc.apvts.getRawParameterValue ("step_" + juce::String (i))->load() == 0.0f);
+        REQUIRE (juce::exactlyEqual (h2.proc.apvts.getRawParameterValue ("step_" + juce::String (i))->load(), 0.0f));
 
     h2.playhead.playing = true;
     h2.run (0.4);

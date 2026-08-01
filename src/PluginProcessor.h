@@ -47,6 +47,12 @@ public:
     int getCurrentStep() const noexcept { return playheadStep.load (std::memory_order_relaxed); }
     float getDisplayBpm() const noexcept { return displayBpm.load (std::memory_order_relaxed); }
 
+    // Diagnostics for the UI status line: what the processor believes the
+    // host is telling it. Invaluable for debugging hosting issues remotely.
+    enum TransportMode { transportUnknown = -1, standaloneClock = 0, hostedStopped = 1, hostedPlaying = 2 };
+    int getTransportMode() const noexcept { return diagTransport.load (std::memory_order_relaxed); }
+    juce::uint32 getTickCount() const noexcept { return diagTickCount.load (std::memory_order_relaxed); }
+
     // Pattern system: 8 slots (A..H) stored in the APVTS state tree. The step
     // and length parameters always hold the *active* pattern; edits are
     // recorded into the selected slot, switching loads another slot.
@@ -130,6 +136,8 @@ private:
 
     std::atomic<int> playheadStep { -1 };
     std::atomic<float> displayBpm { 120.0f };
+    std::atomic<int> diagTransport { transportUnknown };
+    std::atomic<juce::uint32> diagTickCount { 0 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (OpenGlitchAudioProcessor)
 };

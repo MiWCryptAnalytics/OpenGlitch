@@ -482,7 +482,8 @@ void OpenGlitchAudioProcessor::pushChangedParameters()
 void OpenGlitchAudioProcessor::sendTick (int stepIndex, double delayMs)
 {
     static const hv_uint32_t hostTickHash = hv_stringToHash ("host_tick");
-    hv_sendMessageToReceiverV (heavy.get(), hostTickHash, delayMs, "f", (double) stepIndex);
+    if (hv_sendMessageToReceiverV (heavy.get(), hostTickHash, delayMs, "f", (double) stepIndex))
+        diagTickCount.fetch_add (1, std::memory_order_relaxed);
 }
 
 void OpenGlitchAudioProcessor::pushTransport (int numSamples)
@@ -505,6 +506,9 @@ void OpenGlitchAudioProcessor::pushTransport (int numSamples)
             }
         }
     }
+
+    diagTransport.store (hosted ? (playing ? hostedPlaying : hostedStopped) : standaloneClock,
+                         std::memory_order_relaxed);
 
     // With a DAW timeline available, JUCE becomes the clock: the standalone
     // metro is switched off and 16th-note ticks are scheduled below.

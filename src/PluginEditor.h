@@ -195,6 +195,7 @@ private:
     LfoPanel lfoPanel;
     MasterPanel masterPanel;
     juce::Label lcdLabel;
+    juce::Label statusLabel; // transport/tick diagnostics
     juce::TextButton clearButton { "CLEAR" };
     juce::TextButton diceButton { "DICE" };
 

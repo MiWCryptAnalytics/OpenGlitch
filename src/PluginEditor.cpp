@@ -742,6 +742,11 @@ OpenGlitchAudioProcessorEditor::OpenGlitchAudioProcessorEditor (OpenGlitchAudioP
     diceButton.onClick = [this] { processorRef.randomizeActivePattern(); };
     addAndMakeVisible (diceButton);
 
+    statusLabel.setFont (juce::Font (juce::FontOptions (
+        juce::Font::getDefaultMonospacedFontName(), 11.0f, juce::Font::plain)));
+    statusLabel.setColour (juce::Label::textColourId, glitch::palette::textDim);
+    addAndMakeVisible (statusLabel);
+
     startTimerHz (30);
     timerCallback(); // seed the LCD before the first tick
     setSize (940, 620);
@@ -764,6 +769,12 @@ void OpenGlitchAudioProcessorEditor::timerCallback()
     lcdLabel.setText (pattern + " | " + stepText + " | "
                           + juce::String (processorRef.getDisplayBpm(), 1) + " BPM",
                       juce::dontSendNotification);
+
+    static const char* const modes[] = { "no audio yet", "standalone clock",
+                                         "host timeline: stopped", "host timeline: PLAYING" };
+    statusLabel.setText (juce::String (modes[processorRef.getTransportMode() + 1])
+                             + " | ticks " + juce::String (processorRef.getTickCount()),
+                         juce::dontSendNotification);
 }
 
 void OpenGlitchAudioProcessorEditor::paint (juce::Graphics& g)
@@ -817,4 +828,5 @@ void OpenGlitchAudioProcessorEditor::resized()
     lcdLabel.setBounds (getWidth() - margin - 220, 20, 214, 26);
     clearButton.setBounds (getWidth() - margin - 220 - 78, 20, 64, 26);
     diceButton.setBounds (getWidth() - margin - 220 - 78 - 72, 20, 64, 26);
+    statusLabel.setBounds (getWidth() - margin - 300, 48, 294, 13);
 }
