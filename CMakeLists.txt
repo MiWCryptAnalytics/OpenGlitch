@@ -116,7 +116,7 @@ juce_add_plugin(OpenGlitch
     FORMATS VST3 Standalone
     VST3_CATEGORIES Fx
     IS_SYNTH FALSE
-    # MIDI notes C1..G1 switch patterns A..H live
+    # MIDI notes 36..51 switch pattern banks 1..16 live
     NEEDS_MIDI_INPUT TRUE
     NEEDS_MIDI_OUTPUT FALSE
     IS_MIDI_EFFECT FALSE
@@ -192,6 +192,19 @@ if(OPENGLITCH_BUILD_TOOLS)
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)
 
+    # Listening harness: renders the demo pattern and each effect solo to
+    # WAVs (build/renders/) for manual A/B against the original Glitch 1.3.
+    juce_add_console_app(OpenGlitchRender PRODUCT_NAME "OpenGlitchRender")
+    target_sources(OpenGlitchRender PRIVATE tools/RenderDemos.cpp)
+    target_include_directories(OpenGlitchRender PRIVATE tests)
+    target_compile_definitions(OpenGlitchRender PRIVATE
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0)
+    target_link_libraries(OpenGlitchRender PRIVATE
+        OpenGlitchDSP
+        juce::juce_audio_utils
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)
 endif()
 
 # ---------------------------------------------------------------------------

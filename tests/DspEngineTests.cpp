@@ -296,3 +296,312 @@ TEST_CASE ("master: drive mix, resonance and filter mix are live", "[dsp][master
     REQUIRE (rms (hp) < rms (clean) * 0.2f);
     REQUIRE (rms (hpBypassed) > rms (clean) * 0.8f);
 }
+
+TEST_CASE ("retrigger: pitch 2 actually pitches the first slice", "[dsp][fx]")
+{
+    // rate 1 = one slice per step, so before the negative-delay fix the whole
+    // step degenerated to live input whenever pitch > 1.
+    auto zeroCrossings = [] (const std::vector<float>& v)
+    {
+        int n = 0;
+        for (size_t i = 2; i < v.size(); i += 2)
+            if ((v[i - 2] < 0.0f) != (v[i] < 0.0f))
+                ++n;
+        return n;
+    };
+
+    auto runPitched = [] (float pitch)
+    {
+        HeavyHarness h;
+        h.set ("host_playing", 1.0f);
+        h.setAllSteps (3.0f);
+        h.set ("fx_retrigger_rate", 1.0f);
+        h.set ("fx_retrigger_pitch", pitch);
+        h.run (0.5);
+        return h.run (1.0);
+    };
+
+    auto normal = runPitched (1.0f);
+    auto pitched = runPitched (2.0f);
+    REQUIRE (allFinite (pitched));
+    const float ratio = (float) zeroCrossings (pitched) / (float) zeroCrossings (normal);
+    REQUIRE (ratio > 1.6f);
+    REQUIRE (ratio < 2.4f);
+}
+
+TEST_CASE ("tapestop: speed 0.1 parks instead of replaying stale buffer", "[dsp][fx]")
+{
+    HeavyHarness h;
+    h.set ("host_playing", 0.0f);
+    h.setAllSteps (10.0f);
+    h.set ("step_1", 1.0f);
+    h.set ("fx_tapestop_speed", 0.1f);
+    h.run (4.0); // fill the 4s capture so a runaway read would find loud stale audio
+    h.set ("glitch_spansteps", 8.0f);
+    h.tick (0);
+    auto out = h.run (1.0); // one 8-step span at 120bpm
+    REQUIRE (allFinite (out));
+
+    const size_t quarter = (out.size() / 8) * 2; // quarter of the span, even index
+    std::vector<float> head (out.begin(), out.begin() + (long) quarter);
+    std::vector<float> tail (out.end() - (long) quarter, out.end());
+    // Once fully rewound the read parks at the span start (a held sample of
+    // ~zero) instead of replaying audio from 3.9s ago at full level.
+    REQUIRE (rms (tail) < rms (head) * 0.15f);
+}
+
+TEST_CASE ("smoothing: block-rate parameter jumps stay bounded", "[dsp][fx]")
+{
+    struct Site
+    {
+        const char* param;
+        float fx, lo, hi, factor;
+    };
+    // Drive toggles below the clipper knee so the zipper isn't saturated away;
+    // the gater's edges are inherently steep, so its bound is only a smoke check.
+    const Site sites[] = {
+        { "fx_crush_drive", 6.0f, 1.0f, 1.9f, 1.5f },
+        { "fx_delay_feedback", 8.0f, 0.0f, 0.95f, 1.5f },
+        { "fx_gate_duty", 7.0f, 0.05f, 0.95f, 3.0f },
+    };
+
+    for (const auto& s : sites)
+    {
+        DYNAMIC_SECTION (s.param)
+        {
+            auto maxStep = [] (const std::vector<float>& v)
+            {
+                float m = 0;
+                for (size_t i = 2; i < v.size(); i += 2)
+                    m = std::max (m, std::fabs (v[i] - v[i - 2]));
+                return m;
+            };
+
+            auto runToggling = [&s] (bool toggle)
+            {
+                HeavyHarness h;
+                h.set ("host_playing", 1.0f);
+                h.setAllSteps (s.fx);
+                h.set ("fx_crush_rate", 20000.0f);
+                h.set (s.param, s.hi);
+                h.run (0.5);
+                std::vector<float> out;
+                for (int b = 0; b < SR / BLOCK; ++b)
+                {
+                    if (toggle)
+                        h.set (s.param, (b & 1) != 0 ? s.lo : s.hi);
+                    auto o = h.run ((double) BLOCK / SR);
+                    out.insert (out.end(), o.begin(), o.end());
+                }
+                return out;
+            };
+
+            auto toggled = runToggling (true);
+            auto steady = runToggling (false);
+            REQUIRE (allFinite (toggled));
+            REQUIRE (maxStep (toggled) < std::max (s.factor * maxStep (steady), 0.05f));
+        }
+    }
+}
+
+TEST_CASE ("seed: fixed seed reproduces chaos and shuffle", "[dsp][seq]")
+{
+    auto chaosRun = [] (float seed)
+    {
+        HeavyHarness h;
+        h.set ("seq_seed", seed);
+        h.setAllSteps (0.0f);
+        h.set ("seq_chaos", 1.0f);
+        h.set ("host_playing", 1.0f);
+        h.run (0.5);
+        return h.run (1.5);
+    };
+    auto a = chaosRun (42.0f);
+    auto b = chaosRun (42.0f);
+    auto c = chaosRun (43.0f);
+    REQUIRE (allFinite (a));
+    REQUIRE (maxDiff (a, b) < 1e-6f);
+    REQUIRE (maxDiff (a, c) > 0.01f);
+
+    auto shuffleRun = [] (float seed)
+    {
+        HeavyHarness h;
+        h.set ("seq_seed", seed);
+        h.setAllSteps (4.0f);
+        h.set ("fx_shuffle_range", 8.0f);
+        h.set ("host_playing", 1.0f);
+        h.run (0.5);
+        return h.run (1.5);
+    };
+    auto sa = shuffleRun (7.0f);
+    auto sb = shuffleRun (7.0f);
+    auto sc = shuffleRun (8.0f);
+    REQUIRE (maxDiff (sa, sb) < 1e-6f);
+    REQUIRE (maxDiff (sa, sc) > 0.01f);
+}
+
+TEST_CASE ("modulator: ring mod is phase-coherent per step", "[dsp][fx]")
+{
+    HeavyHarness h;
+    h.set ("host_playing", 1.0f);
+    h.setAllSteps (2.0f);
+    h.set ("fx_mod_freq", 3.0f); // slow tremolo, deliberately incommensurate with the step grid
+    std::vector<float> in;
+    auto out = h.run (2.0, &in);
+    REQUIRE (allFinite (out));
+
+    // The osc resets to cos(0)=1 at each step start. Heavy applies messages to
+    // signal inlets with up to a block of latency, so probe 15-20ms after the
+    // trigger: late enough for the worst-case reset, early enough that a 3Hz
+    // cosine has barely moved off its peak.
+    int checked = 0;
+    float worst = 1.0f;
+    for (size_t n = 1; n < playheadEvents().size(); ++n) // skip the startup step
+    {
+        const auto& ev = playheadEvents()[n];
+        const size_t a = ((size_t) ev.sample + (size_t) (0.015 * SR)) * 2;
+        const size_t b = ((size_t) ev.sample + (size_t) (0.020 * SR)) * 2;
+        if (b >= out.size())
+            break;
+        std::vector<float> ow (out.begin() + (long) a, out.begin() + (long) b);
+        std::vector<float> iw (in.begin() + (long) a, in.begin() + (long) b);
+        worst = std::min (worst, rms (ow) / rms (iw));
+        ++checked;
+    }
+    REQUIRE (checked >= 8);
+    REQUIRE (worst > 0.7f);
+}
+
+TEST_CASE ("crusher: bit depth limits distinct output levels", "[dsp][fx]")
+{
+    auto clusters = [] (const std::vector<float>& v)
+    {
+        std::set<long> distinct;
+        for (float x : v)
+            distinct.insert (std::lround (x * 100.0f));
+        return distinct.size();
+    };
+
+    // The harness has no JUCE wrapper, so push the Pd-side level count
+    // (2^(bits-1)) that pushChangedParameters derives from fx_crush_bits.
+    auto runLevels = [] (float levels)
+    {
+        HeavyHarness h;
+        h.set ("host_playing", 1.0f);
+        h.setAllSteps (6.0f);
+        h.set ("fx_crush_drive", 1.0f);
+        h.set ("fx_crush_rate", 20000.0f);
+        h.set ("master_filter_mix", 0.0f); // keep the master IIR from smearing the grid
+        h.set ("fx_crush_level", levels);
+        h.run (0.5);
+        return h.run (1.0);
+    };
+
+    auto crushed = runLevels (2.0f);     // bits 2
+    auto clean = runLevels (32768.0f);   // bits 16, transparent
+    REQUIRE (allFinite (crushed));
+    REQUIRE (clusters (crushed) <= 5);   // 2^bits + 1 levels at most
+    REQUIRE (clusters (clean) > 50);
+    REQUIRE (maxDiff (crushed, clean) > 0.05f);
+}
+
+TEST_CASE ("delay: echoes ring past the step and decay", "[dsp][fx]")
+{
+    // Manual ticks so the single delay step deterministically fires with the
+    // new pattern (the standalone metro would read the bar before it lands).
+    HeavyHarness h;
+    h.set ("host_playing", 0.0f);
+    h.setAllSteps (0.0f);
+    h.set ("step_1", 8.0f);
+    h.set ("fx_delay_feedback", 0.7f);
+    h.run (0.1);
+
+    std::vector<float> out, in;
+    for (int s = 0; s < 16; ++s)
+    {
+        h.set ("glitch_spansteps", 1.0f);
+        h.tick (s);
+        std::vector<float> i;
+        auto o = h.run (0.125, &i);
+        out.insert (out.end(), o.begin(), o.end());
+        in.insert (in.end(), i.begin(), i.end());
+    }
+    REQUIRE (allFinite (out));
+
+    auto windowDiff = [&] (double t0, double t1)
+    {
+        float m = 0;
+        for (size_t i = (size_t) (t0 * SR) * 2; i < (size_t) (t1 * SR) * 2 && i < out.size(); ++i)
+            m = std::max (m, std::fabs (out[i] - in[i]));
+        return m;
+    };
+
+    // The delay step ends at ~120ms; the following steps are dry, so any
+    // difference from the input there is the echo tail ringing out.
+    const float earlyTail = windowDiff (0.15, 0.40);
+    const float lateTail = windowDiff (1.40, 1.85);
+    REQUIRE (earlyTail > 0.02f);
+    REQUIRE (lateTail < 0.5f * earlyTail); // and it decays instead of piling up
+}
+
+TEST_CASE ("gates: equal-power crossfade between correlated steps", "[dsp][fx]")
+{
+    // Dry and a transparent crusher (drive 1, 20kHz rate, 16 bits) carry
+    // near-identical audio, so the sqrt fade law shows as a ~sqrt(2) envelope
+    // bump at the crossfade midpoint. Linear gates would stay flat at 1.
+    HeavyHarness h;
+    h.set ("host_playing", 0.0f);
+    h.setAllSteps (0.0f);
+    h.set ("step_2", 6.0f);
+    h.set ("fx_crush_drive", 1.0f);
+    h.set ("fx_crush_rate", 20000.0f);
+    h.run (0.5);
+
+    float worstBump = 1.0f;
+    float steadyPeak = 0.0f;
+    for (int t = 0; t < 16; ++t)
+    {
+        h.set ("glitch_spansteps", 1.0f);
+        h.tick (t % 2); // alternate dry <-> crusher
+        auto o = h.run (0.125);
+        if (t < 2)
+            continue; // let the alternation establish itself
+        float bump = 0.0f, steady = 0.0f;
+        for (size_t i = 0; i < o.size(); i += 2)
+        {
+            const double ms = 1000.0 * (double) (i / 2) / SR;
+            if (ms < 25.0)
+                bump = std::max (bump, std::fabs (o[i]));
+            else if (ms > 35.0)
+                steady = std::max (steady, std::fabs (o[i]));
+        }
+        worstBump = std::min (worstBump, bump);
+        steadyPeak = std::max (steadyPeak, steady);
+    }
+    REQUIRE (worstBump > 0.58f);  // sqrt fades: ~0.707 peak on a 0.5 input
+    REQUIRE (worstBump < 0.75f);  // and bounded, no runaway
+    REQUIRE (steadyPeak < 0.56f); // steady-state stays unity
+}
+
+TEST_CASE ("reverser: per-channel amounts", "[dsp][fx]")
+{
+    auto channelDiff = [] (const std::vector<float>& a, const std::vector<float>& b, int ch)
+    {
+        float m = 0;
+        for (size_t i = (size_t) ch; i < std::min (a.size(), b.size()); i += 2)
+            m = std::max (m, std::fabs (a[i] - b[i]));
+        return m;
+    };
+
+    HeavyHarness h;
+    h.set ("host_playing", 1.0f);
+    h.setAllSteps (5.0f);
+    h.set ("fx_rev_left", 1.0f);
+    h.set ("fx_rev_right", 0.0f);
+    h.run (0.5);
+    std::vector<float> in;
+    auto out = h.run (1.0, &in);
+    REQUIRE (allFinite (out));
+    REQUIRE (channelDiff (out, in, 1) < 0.05f); // right at 0% plays forward
+    REQUIRE (channelDiff (out, in, 0) > 0.05f); // left at 100% still reverses
+}

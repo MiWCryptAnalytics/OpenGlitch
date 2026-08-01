@@ -26,7 +26,7 @@ int main (int argc, char** argv)
     setParam ("lfo2_shape", 1.0f);
     setParam ("lfo2_rate", 5.0f);
     setParam ("lfo2_depth", 0.6f);
-    setParam ("lfo2_target", 14.0f); // LFO1 Rate
+    setParam ("lfo2_target", (float) lfo::lfo1Rate);
 
     processor.setPlayConfigDetails (2, 2, 48000.0, 512);
     processor.prepareToPlay (48000.0, 512);

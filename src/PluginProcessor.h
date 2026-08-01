@@ -60,7 +60,7 @@ public:
     float getOutputPeak (int index) const noexcept { return outputPeaks[(size_t) index & 255]; }
     int getOutputPeakIndex() const noexcept { return outputPeakIndex.load (std::memory_order_relaxed); }
 
-    // Pattern system: 8 slots (A..H) stored in the APVTS state tree. The step
+    // Pattern system: 16 banks stored in the APVTS state tree. The step
     // and length parameters always hold the *active* pattern; edits are
     // recorded into the selected slot, switching loads another slot.
     static constexpr int numPatterns = 16;

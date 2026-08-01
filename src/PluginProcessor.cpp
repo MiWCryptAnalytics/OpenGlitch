@@ -135,8 +135,15 @@ juce::AudioProcessorValueTreeState::ParameterLayout OpenGlitchAudioProcessor::cr
     effects->addChild (makeInt ("fx_retrigger_rate", "Retrigger Slices", 1, 8, 4, "per step"));
     effects->addChild (makeFloat ("fx_retrigger_pitch", "Retrigger Pitch", 0.25f, 2.0f, 1.0f, 1.0f, "x"));
     effects->addChild (makeInt ("fx_shuffle_range", "Shuffle Range", 1, 8, 4, "steps"));
+    effects->addChild (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID ("fx_rev_left", 1), "Reverse Left",
+        juce::NormalisableRange<float> (0.0f, 1.0f), 1.0f, percentAttributes()));
+    effects->addChild (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID ("fx_rev_right", 1), "Reverse Right",
+        juce::NormalisableRange<float> (0.0f, 1.0f), 1.0f, percentAttributes()));
     effects->addChild (makeHz ("fx_crush_rate", "Crush Rate", 200.0f, 20000.0f, 2500.0f, 2500.0f));
     effects->addChild (makeFloat ("fx_crush_drive", "Crush Drive", 1.0f, 10.0f, 2.0f, 0.0f, "x"));
+    effects->addChild (makeInt ("fx_crush_bits", "Crush Bits", 1, 16, 16, "bits"));
     effects->addChild (makeInt ("fx_gate_rate", "Gate Rate", 1, 16, 4, "per step"));
     effects->addChild (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID ("fx_gate_duty", 1), "Gate Duty",
@@ -188,7 +195,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout OpenGlitchAudioProcessor::cr
                                        "Mod Freq", "Retrig Pitch", "Gate Duty",
                                        "Crush Rate", "Crush Drive", "Delay Feedback",
                                        "Stretch Speed", "TapeStop Speed",
-                                       "Retrig Rate", "Gate Rate" };
+                                       "Retrig Rate", "Gate Rate", "Crush Bits" };
     juce::StringArray targets2 = targets1;
     targets2.addArray ({ "LFO1 Rate", "LFO1 Depth" });
 
@@ -224,9 +231,10 @@ OpenGlitchAudioProcessor::OpenGlitchAudioProcessor()
     static const char* const linkedIds[] = {
         "step_1", "step_2", "step_3", "step_4", "step_5", "step_6", "step_7", "step_8",
         "step_9", "step_10", "step_11", "step_12", "step_13", "step_14", "step_15", "step_16",
-        "seq_chaos", "seq_length", "seq_swing", "seq_declick", "seq_stepenv",
+        "seq_chaos", "seq_length", "seq_swing", "seq_declick", "seq_stepenv", "seq_seed",
         "fx_tapestop_speed", "fx_mod_freq", "fx_retrigger_rate", "fx_retrigger_pitch",
-        "fx_shuffle_range", "fx_crush_rate", "fx_crush_drive", "fx_gate_rate", "fx_gate_duty",
+        "fx_shuffle_range", "fx_rev_left", "fx_rev_right",
+        "fx_crush_rate", "fx_crush_drive", "fx_gate_rate", "fx_gate_duty",
         "fx_delay_div", "fx_delay_feedback", "fx_stretch_speed",
         "master_drive", "master_drive_mix", "master_lowpass", "master_filter_type",
         "master_reso", "master_filter_mix", "master_mix", "bypass"
@@ -239,6 +247,12 @@ OpenGlitchAudioProcessor::OpenGlitchAudioProcessor()
         paramLinks.push_back ({ hv_stringToHash (id), raw, std::numeric_limits<float>::quiet_NaN() });
     }
 
+    // Crush bit depth: the knob is in bits, but Pd receives the quantiser
+    // level count 2^(bits-1) on the plain fx_crush_level receiver.
+    paramLinks.push_back ({ hv_stringToHash ("fx_crush_level"),
+                            apvts.getRawParameterValue ("fx_crush_bits"),
+                            std::numeric_limits<float>::quiet_NaN() });
+
     // LFO wiring: which pushed receivers can be modulated, and the LFO params.
     static const std::pair<const char*, int> modTargets[] = {
         { "master_lowpass", lfo::filterFreq }, { "master_drive", lfo::drive },
@@ -247,7 +261,7 @@ OpenGlitchAudioProcessor::OpenGlitchAudioProcessor()
         { "fx_crush_rate", lfo::crushRate },   { "fx_crush_drive", lfo::crushDrive },
         { "fx_delay_feedback", lfo::delayFeedback }, { "fx_stretch_speed", lfo::stretchSpeed },
         { "fx_tapestop_speed", lfo::tapestopSpeed }, { "fx_retrigger_rate", lfo::retrigRate },
-        { "fx_gate_rate", lfo::gateRate },
+        { "fx_gate_rate", lfo::gateRate },     { "fx_crush_level", lfo::crushBits },
     };
     for (auto& link : paramLinks)
         for (const auto& [id, target] : modTargets)
@@ -295,7 +309,7 @@ OpenGlitchAudioProcessor::OpenGlitchAudioProcessor()
     apvts.addParameterListener ("seq_length", this);
     apvts.addParameterListener ("pattern_select", this);
 
-    patternsTree(); // seed all 8 slots (slot A inherits the demo defaults)
+    patternsTree(); // seed all 16 banks (bank 1 inherits the demo defaults)
 }
 
 // ---------------------------------------------------------------------------
@@ -507,6 +521,13 @@ void OpenGlitchAudioProcessor::prepareToPlay (double sampleRate, int samplesPerB
         }
     }
 
+    // Seed 0 means "surprise me": hand the Pd randoms a fresh session seed so
+    // unseeded runs don't replay Heavy's deterministic LCG state. The APVTS
+    // resend below pushes the stored 0, which the patch-side [moses 1] discards.
+    if (seedRaw != nullptr && (int) seedRaw->load() == 0)
+        hv_sendFloatToReceiver (heavy.get(), hv_stringToHash ("seq_seed"),
+                                (float) (1 + juce::Random::getSystemRandom().nextInt (999)));
+
     // Force a full resend of the real parameter state on the first block.
     for (auto& link : paramLinks)
         link.lastSent = std::numeric_limits<float>::quiet_NaN();
@@ -690,6 +711,11 @@ void OpenGlitchAudioProcessor::pushChangedParameters()
         if (link.modTarget != lfo::off)
             v = lfo::applyMod (link.modTarget, v, (double) modContrib[link.modTarget]);
 
+        // The bits knob (possibly LFO-modulated above) becomes the quantiser
+        // level count Pd actually consumes.
+        if (link.modTarget == lfo::crushBits)
+            v = std::exp2 (std::round (v) - 1.0f);
+
         if (! juce::exactlyEqual (v, link.lastSent)) // NaN sentinel compares unequal, forcing the first send
         {
             // Only mark as sent if the queue accepted it, so a full queue
@@ -851,7 +877,7 @@ void OpenGlitchAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     if (heavy == nullptr)
         return;
 
-    // MIDI notes C1..G1 (36..43) select pattern A..H, Glitch-style live
+    // MIDI notes 36..51 (C1..D#2) select pattern banks 1..16, Glitch-style live
     // switching. Applied on the message thread via the async updater.
     for (const auto metadata : midiMessages)
     {

@@ -14,7 +14,7 @@ enum Shape { sine = 0, triangle, saw, square, random };
 // "every target below lfo1Rate is a parameter target" holds.
 enum Target { off = 0, filterFreq, drive, chaos, modFreq, retrigPitch, gateDuty,
               crushRate, crushDrive, delayFeedback, stretchSpeed, tapestopSpeed,
-              retrigRate, gateRate,
+              retrigRate, gateRate, crushBits,
               lfo1Rate, lfo1Depth, numTargets };
 
 // 16th-note steps per LFO cycle, indexed by the rate choice parameter.
@@ -58,6 +58,7 @@ inline float applyMod (int target, float base, double c)
         case tapestopSpeed: return std::clamp (base * (float) std::exp2 (c), 0.1f, 4.0f);
         case retrigRate:    return std::clamp (base + 3.5f * (float) c, 1.0f, 8.0f);
         case gateRate:      return std::clamp (base + 7.5f * (float) c, 1.0f, 16.0f);
+        case crushBits:     return std::clamp (base + 7.5f * (float) c, 1.0f, 16.0f);
         default:            return base;
     }
 }

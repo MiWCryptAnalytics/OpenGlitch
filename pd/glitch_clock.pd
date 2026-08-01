@@ -208,3 +208,14 @@
 #X connect 69 1 71 0;
 #X connect 71 1 16 1;
 #X connect 71 0 15 0;
+#X obj 700 650 r seq_seed;
+#X obj 700 680 moses 1;
+#X msg 700 710 seed \$1;
+#X obj 780 680 + 1;
+#X msg 780 710 seed \$1;
+#X connect 93 0 94 0;
+#X connect 94 1 95 0;
+#X connect 95 0 55 0;
+#X connect 94 1 96 0;
+#X connect 96 0 97 0;
+#X connect 97 0 59 0;

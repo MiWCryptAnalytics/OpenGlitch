@@ -608,11 +608,16 @@ EffectPanel::EffectPanel (juce::AudioProcessorValueTreeState& state)
                                    "Pitch of each repeat. Detune it for stutter arpeggios.") };
     knobsForEffect[4] = { addKnob (state, "fx_shuffle_range", "RANGE",
                                    "How many steps back the shuffler may dig.") };
-    knobsForEffect[5] = {};
+    knobsForEffect[5] = { addKnob (state, "fx_rev_left", "LEFT",
+                                   "How much of the left channel plays reversed."),
+                          addKnob (state, "fx_rev_right", "RIGHT",
+                                   "How much of the right channel plays reversed. Split them for ping-pong reversals.") };
     knobsForEffect[6] = { addKnob (state, "fx_crush_rate", "RATE",
                                    "Sample-rate decimation target."),
                           addKnob (state, "fx_crush_drive", "DRIVE",
-                                   "Pushes the wreckage into a hard clip.") };
+                                   "Pushes the wreckage into a hard clip."),
+                          addKnob (state, "fx_crush_bits", "BITS",
+                                   "Bit depth. 16 is transparent; low values chew the signal.") };
     knobsForEffect[7] = { addKnob (state, "fx_gate_rate", "RATE",
                                    "Chops per step."),
                           addKnob (state, "fx_gate_duty", "DUTY",
@@ -1027,14 +1032,14 @@ void LfoPanel::drawScope (juce::Graphics& g, juce::Rectangle<float> r) const
     // Routing labels
     static const char* const targetNames[] = { "OFF", "FILTER", "DRIVE", "CHAOS", "MOD",
                                                "PITCH", "DUTY", "CRUSH", "C.DRIVE", "DLY FB",
-                                               "STRETCH", "TAPE", "R.RATE", "G.RATE",
+                                               "STRETCH", "TAPE", "R.RATE", "G.RATE", "BITS",
                                                "L1 RATE", "L1 DEPTH" };
     g.setFont (juce::Font (juce::FontOptions (9.5f)).boldened());
     g.setColour (magenta.withAlpha (0.75f));
-    g.drawText (juce::String ("1 > ") + targetNames[juce::jlimit (0, 15, c[0].target)],
+    g.drawText (juce::String ("1 > ") + targetNames[juce::jlimit (0, 16, c[0].target)],
                 (int) r.getX() + 6, (int) r.getY() + 3, 84, 11, juce::Justification::centredLeft);
     g.setColour (cyan.withAlpha (0.75f));
-    g.drawText (juce::String ("2 > ") + targetNames[juce::jlimit (0, 15, c[1].target)],
+    g.drawText (juce::String ("2 > ") + targetNames[juce::jlimit (0, 16, c[1].target)],
                 (int) r.getRight() - 90, (int) r.getY() + 3, 84, 11, juce::Justification::centredRight);
 }
 

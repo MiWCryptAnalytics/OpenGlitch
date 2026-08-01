@@ -13,7 +13,7 @@
 #X obj 260 270 phasor~ 32;
 #X msg 400 240 0;
 #X obj 460 200 r fx_gate_duty @hv_param 0.05 0.95 0.5;
-#X obj 460 230 sig~ 0.5;
+#X obj 460 230 pack f 5;
 #X obj 260 310 -~;
 #X obj 260 340 *~ 1000;
 #X obj 260 370 clip~ 0 1;
@@ -39,7 +39,6 @@
 #X connect 4 0 12 0;
 #X connect 12 0 11 1;
 #X connect 13 0 14 0;
-#X connect 14 0 15 0;
 #X connect 11 0 15 1;
 #X connect 15 0 16 0;
 #X connect 16 0 17 0;
@@ -51,10 +50,15 @@
 #X connect 21 0 22 0;
 #X connect 22 0 23 0;
 #X connect 18 0 24 0;
-#X connect 23 0 24 1;
 #X connect 19 0 25 0;
-#X connect 23 0 25 1;
 #X connect 24 0 26 0;
 #X connect 25 0 27 0;
 #X obj 800 20 r glitch_fade;
 #X connect 28 0 22 1;
+#X obj 460 260 line~;
+#X connect 14 0 29 0;
+#X connect 29 0 15 0;
+#X obj 460 430 sqrt~;
+#X connect 23 0 30 0;
+#X connect 30 0 24 1;
+#X connect 30 0 25 1;

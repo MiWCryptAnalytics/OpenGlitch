@@ -15,10 +15,10 @@ Licensed under **GPLv3** (see [LICENSE](LICENSE)).
 
 Feature complete for 1.0:
 
-- **8 pattern slots (A–H)** — the strip below the matrix switches patterns;
+- **16 pattern banks (1–16)** — the strip below the matrix switches patterns;
   edits always record into the active slot; shift-click a slot to copy the
   current pattern there. The selector is a DAW-automatable parameter, and
-  **MIDI notes C1–G1 (36–43) switch patterns live**, Glitch-style.
+  **MIDI notes 36–51 (C1–D#2) switch patterns live**, Glitch-style.
 - **Per-pattern length** (1–16 steps) for odd meters and polymeter loops.
 - **Swing** (0–100%) — sample-accurately scheduled in hosted mode, delayed
   odd-step firing in the standalone clock.
@@ -94,16 +94,16 @@ Effect indices for the `step_1..16` parameters:
 | 2 | Modulator | ring mod, tremolo → metallic | `fx_mod_freq` |
 | 3 | Retrigger | loops the step's first slice | `fx_retrigger_rate`, `fx_retrigger_pitch` |
 | 4 | Shuffler | swaps in a random earlier step | `fx_shuffle_range` |
-| 5 | Reverser | plays recent audio backwards | — |
-| 6 | Crusher | sample-rate crush + drive | `fx_crush_rate`, `fx_crush_drive` |
+| 5 | Reverser | plays recent audio backwards, per-channel amounts | `fx_rev_left`, `fx_rev_right` |
+| 6 | Crusher | sample-rate crush + bit depth + drive | `fx_crush_rate`, `fx_crush_drive`, `fx_crush_bits` |
 | 7 | Gater | rhythmic chopper | `fx_gate_rate`, `fx_gate_duty` |
-| 8 | Delay | tempo-synced damped echo | `fx_delay_div`, `fx_delay_feedback` |
+| 8 | Delay | tempo-synced damped echo, tails ring past the step | `fx_delay_div`, `fx_delay_feedback` |
 | 9 | Stretcher | tape-style half-speed drag | `fx_stretch_speed` |
 
 Master: `master_drive`, `master_lowpass`, `master_mix`, `bypass`, `seq_chaos`.
 The sequencer emits a `playhead` output parameter for the Phase 4 GUI.
 
-As of Phase 3, all 34 parameters are exposed to the DAW through a JUCE
+All 121 parameters are exposed to the DAW through a JUCE
 `AudioProcessorValueTreeState` (grouped Sequencer / Effects / Master, step
 slots as named choices, proper units and log skews, `bypass` reported as the
 host bypass parameter), and plugin state saves/restores with the session.

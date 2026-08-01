@@ -87,7 +87,7 @@ private:
     int lastPaintCol = -1, lastPaintRow = -1; // for drag-to-span gestures
 };
 
-// Strip below the matrix: pattern slots A..H (click to switch, shift-click to
+// Strip below the matrix: pattern banks 1..16 (click to switch, shift-click to
 // copy the current pattern there), plus pattern length and swing.
 class SequencerBar : public juce::Component,
                      public juce::TooltipClient

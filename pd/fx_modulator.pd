@@ -23,10 +23,16 @@
 #X connect 8 0 9 0;
 #X connect 9 0 10 0;
 #X connect 5 0 11 0;
-#X connect 10 0 11 1;
 #X connect 6 0 12 0;
-#X connect 10 0 12 1;
 #X connect 11 0 13 0;
 #X connect 12 0 14 0;
 #X obj 800 20 r glitch_fade;
 #X connect 15 0 9 1;
+#X obj 400 70 r glitch_stepbang;
+#X msg 400 100 0;
+#X connect 16 0 17 0;
+#X connect 17 0 4 1;
+#X obj 260 320 sqrt~;
+#X connect 10 0 18 0;
+#X connect 18 0 11 1;
+#X connect 18 0 12 1;
