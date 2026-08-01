@@ -513,3 +513,63 @@ TEST_CASE ("host: 16 pattern banks, midi note 51 selects the last", "[host][patt
     juce::MessageManager::getInstance()->runDispatchLoopUntil (200);
     REQUIRE (h.proc.getActivePattern() == 15);
 }
+
+#include "PluginEditor.h"
+
+TEST_CASE ("matrix gestures: paint, span-drag, stretch, toggle, erase", "[host][ui]")
+{
+    Harness h;
+    StepMatrix matrix (h.proc.apvts);
+    auto step = [&] (int i)
+    {
+        return (int) std::lround (h.proc.apvts.getRawParameterValue ("step_" + juce::String (i))->load());
+    };
+    for (int i = 1; i <= 16; ++i)
+        h.setParam ("step_" + juce::String (i), 0.0f);
+
+    // Plain click paints; clicking again toggles it off.
+    matrix.handlePress (4, 2); // retrigger at step 5
+    matrix.handleRelease();
+    REQUIRE (step (5) == 3);
+    matrix.handlePress (4, 2);
+    matrix.handleRelease();
+    REQUIRE (step (5) == 0);
+
+    // Press empty and drag right: trigger plus ties.
+    matrix.handlePress (4, 2);
+    matrix.handleDrag (5, 2);
+    matrix.handleDrag (6, 2);
+    matrix.handleRelease();
+    REQUIRE (step (5) == 3);
+    REQUIRE (step (6) == 10);
+    REQUIRE (step (7) == 10);
+
+    // Press the EXISTING trigger and drag right: stretches, must NOT clear.
+    matrix.handlePress (4, 2);
+    matrix.handleDrag (8, 2); // fast flick skipping columns
+    matrix.handleRelease();
+    REQUIRE (step (5) == 3);
+    for (int i = 6; i <= 9; ++i)
+        REQUIRE (step (i) == 10);
+
+    // Wobble within the pressed cell must not cancel a pending toggle-off.
+    matrix.handlePress (4, 2);
+    matrix.handleDrag (4, 2);
+    matrix.handleRelease();
+    REQUIRE (step (5) == 0); // cleared: it was a click, not a drag
+
+    // Row change mid-drag starts a new block on the other row.
+    matrix.handlePress (0, 2);
+    matrix.handleDrag (1, 2);
+    matrix.handleDrag (2, 6); // jump to gater row
+    matrix.handleDrag (3, 6);
+    matrix.handleRelease();
+    REQUIRE (step (1) == 3);
+    REQUIRE (step (2) == 10);
+    REQUIRE (step (3) == 7);
+    REQUIRE (step (4) == 10);
+
+    // Erase clears a column regardless of content.
+    matrix.handleErase (2);
+    REQUIRE (step (3) == 0);
+}

@@ -233,6 +233,54 @@ void StepMatrix::clearAll()
         setStep (i, 0);
 }
 
+void StepMatrix::handlePress (int col, int row)
+{
+    // Pressing a cell that already holds this effect arms a clear-on-release,
+    // so a plain click toggles but press-and-drag stretches the block instead.
+    pendingClearOnUp = (steps[(size_t) col] == row + 1);
+    if (! pendingClearOnUp)
+        setStep (col, row + 1);
+    lastPaintCol = col;
+    lastPaintRow = row;
+    if (onEffectTouched)
+        onEffectTouched (row + 1);
+}
+
+void StepMatrix::handleDrag (int col, int row)
+{
+    if (col == lastPaintCol && row == lastPaintRow)
+        return; // wobble within the pressed cell
+    pendingClearOnUp = false;
+
+    // Dragging rightwards along the same row extends the block as a span
+    // (Tie steps), like stretching a block in the original Glitch. A fast
+    // drag can skip columns, so every column passed over is filled in.
+    // Changing row (or dragging left) paints a fresh trigger instead.
+    if (row == lastPaintRow && col > lastPaintCol && steps[(size_t) lastPaintCol] != 0)
+    {
+        for (int c = lastPaintCol + 1; c <= col; ++c)
+            setStep (c, 10);
+    }
+    else
+    {
+        setStep (col, row + 1);
+    }
+    lastPaintCol = col;
+    lastPaintRow = row;
+}
+
+void StepMatrix::handleRelease()
+{
+    if (pendingClearOnUp && lastPaintCol >= 0)
+        setStep (lastPaintCol, 0);
+    pendingClearOnUp = false;
+}
+
+void StepMatrix::handleErase (int col)
+{
+    setStep (col, 0);
+}
+
 void StepMatrix::mouseDown (const juce::MouseEvent& e)
 {
     const auto pos = e.position;
@@ -241,7 +289,7 @@ void StepMatrix::mouseDown (const juce::MouseEvent& e)
     if (e.mods.isPopupMenu())
     {
         if (locateCell (pos, col, row))
-            setStep (col, 0);
+            handleErase (col);
         return;
     }
 
@@ -253,40 +301,25 @@ void StepMatrix::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
-    if (! locateCell (pos, col, row))
-        return;
-
-    eraseGesture = (steps[(size_t) col] == row + 1);
-    setStep (col, eraseGesture ? 0 : row + 1);
-    lastPaintCol = col;
-    lastPaintRow = row;
-    if (onEffectTouched)
-        onEffectTouched (row + 1);
+    if (locateCell (pos, col, row))
+        handlePress (col, row);
 }
 
 void StepMatrix::mouseDrag (const juce::MouseEvent& e)
 {
-    if (e.mods.isPopupMenu())
-        return;
     int col = 0, row = 0;
     if (! locateCell (e.position, col, row))
         return;
-
-    // Dragging rightwards along the same row extends the block as a span
-    // (Tie steps), like stretching a block in the original Glitch. A fast
-    // drag can skip columns, so every column passed over is filled in.
-    if (! eraseGesture && row == lastPaintRow && col > lastPaintCol
-        && steps[(size_t) lastPaintCol] != 0)
-    {
-        for (int c = lastPaintCol + 1; c <= col; ++c)
-            setStep (c, 10);
-    }
+    if (e.mods.isPopupMenu())
+        handleErase (col); // right-drag sweeps columns clear
     else
-    {
-        setStep (col, eraseGesture ? 0 : row + 1);
-    }
-    lastPaintCol = col;
-    lastPaintRow = row;
+        handleDrag (col, row);
+}
+
+void StepMatrix::mouseUp (const juce::MouseEvent& e)
+{
+    if (! e.mods.isPopupMenu())
+        handleRelease();
 }
 
 void StepMatrix::paint (juce::Graphics& g)

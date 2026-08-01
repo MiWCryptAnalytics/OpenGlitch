@@ -52,6 +52,15 @@ public:
     void paint (juce::Graphics&) override;
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+
+    // Gesture logic, exposed for tests: press paints (or arms a clear if the
+    // cell already holds this effect), dragging rightwards along the row ties
+    // the passed columns into a span, release performs an armed clear.
+    void handlePress (int col, int row);
+    void handleDrag (int col, int row);
+    void handleRelease();
+    void handleErase (int col);
 
 private:
     float cellWidth() const;
@@ -69,7 +78,7 @@ private:
     std::unique_ptr<juce::ParameterAttachment> lengthAttachment;
     int patternLength = 16;
     int playheadColumn = -1;
-    bool eraseGesture = false;
+    bool pendingClearOnUp = false; // click-in-place toggles; dragging cancels it
     int lastPaintCol = -1, lastPaintRow = -1; // for drag-to-span gestures
 };
 
