@@ -1,157 +1,90 @@
 # OpenGlitch
 
+[![CI](https://github.com/MiWCryptAnalytics/OpenGlitch/actions/workflows/ci.yml/badge.svg)](https://github.com/MiWCryptAnalytics/OpenGlitch/actions/workflows/ci.yml)
+
 ![OpenGlitch UI](docs/screenshot.png)
 
-An open-source recreation of **dblue Glitch 1.3** (original concept by Kieran Foster),
-built from:
+OpenGlitch is a free recreation of **dblue Glitch 1.3**, the discontinued
+freeware glitch effect originally created by Kieran Foster. It slices
+incoming audio on a 16-step grid and fires a different effect on every
+step: tape stops, ring mod, retriggers, shuffles, reverses, bit crushes,
+gating, delay, tape-drag stretches.
 
-- **Pure Data** patches compiled to C/C++ by **[hvcc](https://github.com/Wasted-Audio/hvcc)** (Wasted-Audio fork)
-- **[JUCE 8](https://github.com/juce-framework/JUCE)** for the plugin wrapper and GUI
-- **CMake** for the build
+It's an independent GPL project, not affiliated with or endorsed by
+illformed. Under the hood the DSP is a Pure Data patch compiled to C++ with
+[hvcc](https://github.com/Wasted-Audio/hvcc) and wrapped in
+[JUCE 8](https://github.com/juce-framework/JUCE).
 
-Licensed under **GPLv3** (see [LICENSE](LICENSE)).
+## Highlights
 
-## Status
+- Nine effects on a 9×16 grid — click to place, drag to paint, drag along a
+  row to tie steps into longer spans (a tape stop that winds down over four
+  steps, a reverser that flips a whole bar)
+- 16 pattern banks, switchable live over MIDI (notes 36–51), with
+  per-pattern length and swing for odd meters and polymeter loops
+- Chaos, one-click DICE fills, and an FX randomiser with a reproducible seed
+- Two tempo-synced LFOs with a live scope — LFO 2 can modulate LFO 1's rate
+  or depth for cascaded movement
+- Per-effect output strips (filter, pan, mix, gain) plus a master multimode
+  filter with resonance, overdrive, and filter sweep envelopes
+- Locks sample-accurately to the host transport; the standalone free-runs
+  with identical timing, and you can drop a WAV/FLAC on it to loop through
+  the engine
 
-Feature complete for 1.0:
+## Download
 
-- **16 pattern banks (1–16)** — the strip below the matrix switches patterns;
-  edits always record into the active slot; shift-click a slot to copy the
-  current pattern there. The selector is a DAW-automatable parameter, and
-  **MIDI notes 36–51 (C1–D#2) switch patterns live**, Glitch-style.
-- **Per-pattern length** (1–16 steps) for odd meters and polymeter loops.
-- **Swing** (0–100%) — sample-accurately scheduled in hosted mode, delayed
-  odd-step firing in the standalone clock.
-- **Mono tracks supported** (mono in is duplicated, mono out averaged).
-- **Effect spans (Tie)** — drag across a row to stretch one effect over
-  multiple steps, like the original's wide blocks. Tied steps don't
-  re-trigger: a tape stop winds down across the whole span, a retrigger
-  keeps looping its first slice, a reverser reverses the full length.
-  Step parameters gained an 11th choice ("Tie") for this.
-- **One clock** — JUCE drives the sequencer everywhere now; without a host
-  timeline a virtual one free-runs, so swing, chaos and spans behave
-  identically in DAWs and standalone.
-- **DICE** — one click fills the active pattern with a random (musically
-  weighted) grid, occasionally tying steps into spans; CLEAR empties it.
-- **Multimode master filter** — Lowpass / Highpass / Bandpass selector under
-  the master faders (bandpass is a hip~/lop~ series pair).
-- **Tempo-synced ring modulator** — a SYNC selector on the Modulator panel
-  locks its frequency to divisions from 1/16 to a full bar.
-- **Filter sweep envelopes** — the original's waveform-button row: a
-  shape (Down/Up/Tri/Sine/Square) that sweeps the filter cutoff across
-  each step in octaves, per effect and on the master filter. Ours sweeps
-  across a whole span when steps are tied.
-- **Master output Volume** (ramped, click-free).
-- **Per-effect output strips** — every effect has its own filter
-  (Off/LP/HP/BP + freq), pan, mix and gain, like the original's column
-  strips. Implemented as one shared post stage that snaps to whichever
-  effect fires (only one sounds at a time); live tweaks stream instantly.
-- **De-Click** (gate crossfade 1-30 ms) and **Step Envelope** (per-step
-  decay) from the original's top row.
-- **Randomise FX + Seed** — the FX button dices every effect knob and
-  output strip; a non-zero Seed makes rolls reproducible, advancing per
-  press like the original.
-- **Master extras** — Overdrive Mix (parallel drive), filter Resonance
-  (bp~ peak layered on the cutoff) and Filter Mix.
-- **16 pattern banks** (MIDI notes C1-D#2 / 36-51 switch them live) and
-  **pattern Shift arrows** (< > rotate the grid within its length).
-- **Templates** — four factory patterns (stutter, buildup, halftime
-  wreck, ambient smear) on T1-T4 buttons, and the **Seed** control now has
-  a UI. With these, every feature of the original dblue Glitch 1.3 panel
-  is implemented.
-- **Modulation scope** — a live phosphor-style display of both LFOs over
-  the bar, computed from the real coupled math: when LFO 2 drives LFO 1's
-  rate you watch the trace warp exactly as it sounds.
-- **Two tempo-synced LFOs** (sine/tri/saw/square/S&H random, 1/16 to 4 bars,
-  ppq-locked to the DAW bar). Targets: filter freq, drive, chaos, mod freq,
-  retrigger pitch, gate duty — and LFO 2 can instead drive **LFO 1's rate or
-  depth** for cascaded, derivative modulation.
+Grab the zip for your platform from the
+[releases page](https://github.com/MiWCryptAnalytics/OpenGlitch/releases).
+Each one contains the standalone app and:
 
-Phase 4 — full custom GUI. The editor recreates the Glitch matrix: 9 effect
-rows x 16 step columns. Click a cell to assign the effect, click again to
-clear, drag to paint, right-click to erase a column. The playhead lamp and
-column wash follow the DAW-locked sequencer, an LCD shows step and tempo,
-the bottom panel swaps to the knobs of the last-touched effect, and the
-right-hand strip carries Chaos / Drive / Filter / Mix plus Bypass. Everything
-binds through APVTS attachments; a headless screenshot tool
-(`-DOPENGLITCH_BUILD_TOOLS=ON`, target `OpenGlitchScreenshot`) renders the
-editor to PNG without a display for docs and CI.
+- **Windows** — VST3
+- **macOS** — VST3 and AU (universal: Apple Silicon + Intel)
+- **Linux** — VST3 and LV2
 
-Phase 2 — the DSP engine is complete in Pure Data. A 16-step sequencer
-(`glitch_clock`) runs at one 16th note per step from `host_bpm`/`host_playing`
-(free-running at 120 BPM until Phase 3 wires up DAW transport) and broadcasts
-the current step's effect to nine parallel effect patches, gated in with 5 ms
-crossfades. A `seq_chaos` control randomly overrides the programmed grid, and a
-master section adds overdrive, lowpass and wet/dry mix. The default grid ships
-with a demo pattern so the plugin glitches audibly on first load.
+Copy the plugin into your usual folder (`~/.vst3` and `~/.lv2` on Linux,
+`~/Library/Audio/Plug-Ins` on macOS, `C:\Program Files\Common Files\VST3`
+on Windows).
 
-Effect indices for the `step_1..16` parameters:
-
-| # | Effect | Character | Controls |
-|---|--------|-----------|----------|
-| 0 | Dry | untouched input | — |
-| 1 | TapeStop | slows to a stop across the step | `fx_tapestop_speed` |
-| 2 | Modulator | ring mod, tremolo → metallic | `fx_mod_freq` |
-| 3 | Retrigger | loops the step's first slice | `fx_retrigger_rate`, `fx_retrigger_pitch` |
-| 4 | Shuffler | swaps in a random earlier step | `fx_shuffle_range` |
-| 5 | Reverser | plays recent audio backwards, per-channel amounts | `fx_rev_left`, `fx_rev_right` |
-| 6 | Crusher | sample-rate crush + bit depth + drive | `fx_crush_rate`, `fx_crush_drive`, `fx_crush_bits` |
-| 7 | Gater | rhythmic chopper | `fx_gate_rate`, `fx_gate_duty` |
-| 8 | Delay | tempo-synced damped echo, tails ring past the step | `fx_delay_div`, `fx_delay_feedback` |
-| 9 | Stretcher | tape-style half-speed drag | `fx_stretch_speed` |
-
-Master: `master_drive`, `master_lowpass`, `master_mix`, `bypass`, `seq_chaos`.
-The sequencer emits a `playhead` output parameter for the Phase 4 GUI.
-
-All 121 parameters are exposed to the DAW through a JUCE
-`AudioProcessorValueTreeState` (grouped Sequencer / Effects / Master, step
-slots as named choices, proper units and log skews, `bypass` reported as the
-host bypass parameter), and plugin state saves/restores with the session.
-
-**Transport sync:** when a DAW timeline is present, JUCE *is* the clock — the
-Pd metro is switched off and every 16th note is derived from `ppqPosition`
-and scheduled sample-accurately into the Heavy context (`host_tick`), so the
-grid locks to the DAW bar and follows loops, relocates and tempo changes.
-Step 1 is always the start of a bar. On transport stop the engine falls back
-to clean dry. Without a timeline (standalone) the Phase 2 free-running
-120 BPM metro takes over.
-
-## Tests
-
-A Catch2/CTest suite covers three layers: the Heavy DSP engine driven
-directly (sequencer, effects, external clock, swing/length timing, filter
-modes), the pure LFO/modulation math, and full host simulation (a fake
-`AudioPlayHead` feeding transport/tempo/ppq to the real processor — the layer
-neither pluginval nor DSP tests can see). Each test case runs as an isolated
-process with a timeout, so hangs fail instead of blocking.
+The macOS builds are not code-signed, so Gatekeeper will quarantine them.
+After unzipping, clear the flag with:
 
 ```sh
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DOPENGLITCH_BUILD_TESTS=ON
-cmake --build build --target OpenGlitchTests -j
-ctest --test-dir build -j$(nproc)
+xattr -cr OpenGlitch.vst3 OpenGlitch.component OpenGlitch.app
 ```
 
 ## Building
 
-Requirements: CMake ≥ 3.22, a C++17 compiler, Python ≥ 3.9, and (on Linux) the
-usual JUCE dev packages (ALSA, X11, freetype, fontconfig).
+Requirements: CMake ≥ 3.22, a C++17 compiler, Python ≥ 3.9, and on Linux
+the usual JUCE dev packages (ALSA, X11, freetype, fontconfig — the exact
+apt list is in [.github/workflows/ci.yml](.github/workflows/ci.yml)).
 
 ```sh
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ```
 
-The first configure fetches JUCE and hvcc and installs hvcc into a virtualenv
-inside `build/`. The Pd patch `pd/main.pd` is recompiled by hvcc automatically
-whenever it changes.
+The first configure fetches JUCE and hvcc and installs hvcc into a
+virtualenv inside `build/`. The Pd patch is recompiled automatically
+whenever it changes, and built plugins are copied into your user plugin
+folders (pass `-DOPENGLITCH_INSTALL_PLUGIN=OFF` to skip that).
 
-Artifacts land in `build/OpenGlitch_artefacts/Release/`:
+To run the tests:
 
-- `VST3/OpenGlitch.vst3`
-- `Standalone/OpenGlitch`
+```sh
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DOPENGLITCH_BUILD_TESTS=ON
+cmake --build build -j
+ctest --test-dir build -j$(nproc)
+```
 
-## Layout
+## Documentation
 
-- `pd/main.pd` — the DSP, as a Pure Data patch (edit with plain Pd-vanilla)
-- `src/` — JUCE C++ wrapper (processor, later the step-sequencer GUI)
-- `CMakeLists.txt` — fetches JUCE + hvcc, runs hvcc, builds the plugin
+- [docs/DESIGN.md](docs/DESIGN.md) — how it works: the Pd → hvcc → JUCE
+  pipeline, the clock, effects and parameters, tests
+- [docs/PARITY.md](docs/PARITY.md) — control-by-control comparison with the
+  original Glitch 1.3
+
+## License
+
+GPLv3 — see [LICENSE](LICENSE). Original concept by Kieran Foster; this
+project is not affiliated with illformed. Bundled fonts (Rubik Glitch,
+Space Mono) are under the SIL Open Font License.
