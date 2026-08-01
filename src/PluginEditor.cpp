@@ -101,6 +101,29 @@ void OpenGlitchLookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, i
                                               float sliderPos, float minSliderPos, float maxSliderPos,
                                               juce::Slider::SliderStyle style, juce::Slider& slider)
 {
+    using namespace glitch::palette;
+
+    if (style == juce::Slider::LinearHorizontal)
+    {
+        const float cy = (float) y + (float) height * 0.5f;
+        const auto fill = slider.findColour (juce::Slider::rotarySliderFillColourId);
+
+        juce::Rectangle<float> track ((float) x, cy - 3.0f, (float) width, 6.0f);
+        g.setColour (juce::Colour (0xff30353e));
+        g.fillRoundedRectangle (track, 3.0f);
+
+        juce::Rectangle<float> filled ((float) x, cy - 3.0f, sliderPos - (float) x, 6.0f);
+        g.setColour (fill.withAlpha (0.85f));
+        g.fillRoundedRectangle (filled, 3.0f);
+
+        juce::Rectangle<float> thumb (sliderPos - 4.0f, cy - 9.0f, 8.0f, 18.0f);
+        g.setColour (text);
+        g.fillRoundedRectangle (thumb, 3.0f);
+        g.setColour (cellStroke);
+        g.drawRoundedRectangle (thumb, 3.0f, 1.0f);
+        return;
+    }
+
     if (style != juce::Slider::LinearVertical)
     {
         juce::LookAndFeel_V4::drawLinearSlider (g, x, y, width, height, sliderPos,
@@ -108,7 +131,6 @@ void OpenGlitchLookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, i
         return;
     }
 
-    using namespace glitch::palette;
     const float cx = (float) x + (float) width * 0.5f;
     const auto fill = slider.findColour (juce::Slider::rotarySliderFillColourId);
 
@@ -144,6 +166,18 @@ StepMatrix::StepMatrix (juce::AudioProcessorValueTreeState& state)
                 repaint();
             });
         attachments[(size_t) i]->sendInitialUpdate();
+    }
+
+    if (auto* lengthParam = state.getParameter ("seq_length"))
+    {
+        lengthAttachment = std::make_unique<juce::ParameterAttachment> (
+            *lengthParam,
+            [this] (float v)
+            {
+                patternLength = juce::jlimit (1, 16, (int) std::lround (v));
+                repaint();
+            });
+        lengthAttachment->sendInitialUpdate();
     }
 }
 
@@ -272,6 +306,7 @@ void StepMatrix::paint (juce::Graphics& g)
             auto cell = juce::Rectangle<float> (columnX (c), ry, cw, rh).reduced (2.0f);
             const bool active = steps[(size_t) c] == r + 1;
             const bool onPlayhead = c == playheadColumn;
+            const bool beyondLength = c >= patternLength;
 
             if (active)
             {
@@ -280,15 +315,20 @@ void StepMatrix::paint (juce::Graphics& g)
                     g.setColour (colour.withAlpha (0.45f));
                     g.fillRoundedRectangle (cell.expanded (3.0f), 5.0f);
                 }
-                g.setColour (onPlayhead ? colour.brighter (0.35f) : colour.withAlpha (0.88f));
+                auto fill = onPlayhead ? colour.brighter (0.35f) : colour.withAlpha (0.88f);
+                if (beyondLength)
+                    fill = fill.withMultipliedAlpha (0.25f);
+                g.setColour (fill);
                 g.fillRoundedRectangle (cell, 3.5f);
-                g.setColour (colour.brighter (0.6f));
+                g.setColour (colour.brighter (0.6f).withMultipliedAlpha (beyondLength ? 0.25f : 1.0f));
                 g.drawRoundedRectangle (cell, 3.5f, 1.2f);
             }
             else
             {
                 // Alternate the 4-step beat groups so the bar stays readable.
                 auto base = ((c / 4) % 2 == 1) ? cellOff.brighter (0.13f) : cellOff;
+                if (beyondLength)
+                    base = base.darker (0.5f);
                 g.setColour (onPlayhead ? base.brighter (0.25f) : base);
                 g.fillRoundedRectangle (cell, 3.5f);
                 g.setColour (cellStroke);
@@ -302,6 +342,92 @@ void StepMatrix::paint (juce::Graphics& g)
     {
         g.setColour (juce::Colours::white.withAlpha (0.05f));
         g.fillRoundedRectangle (columnX (playheadColumn), 0.0f, cw, (float) getHeight(), 3.0f);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SequencerBar
+// ---------------------------------------------------------------------------
+SequencerBar::SequencerBar (OpenGlitchAudioProcessor& proc)
+    : processor (proc)
+{
+    if (auto* param = proc.apvts.getParameter ("pattern_select"))
+    {
+        patternAttachment = std::make_unique<juce::ParameterAttachment> (
+            *param,
+            [this] (float v)
+            {
+                activeSlot = juce::jlimit (0, OpenGlitchAudioProcessor::numPatterns - 1,
+                                           (int) std::lround (v));
+                repaint();
+            });
+        patternAttachment->sendInitialUpdate();
+    }
+
+    for (auto* slider : { &lengthSlider, &swingSlider })
+    {
+        slider->setSliderStyle (juce::Slider::LinearHorizontal);
+        slider->setTextBoxStyle (juce::Slider::TextBoxRight, false, 46, 16);
+        addAndMakeVisible (*slider);
+    }
+    lengthSlider.setColour (juce::Slider::rotarySliderFillColourId, glitch::palette::lamp);
+    swingSlider.setColour (juce::Slider::rotarySliderFillColourId, juce::Colour (0xffe040fb));
+
+    lengthAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        proc.apvts, "seq_length", lengthSlider);
+    swingAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        proc.apvts, "seq_swing", swingSlider);
+}
+
+juce::Rectangle<float> SequencerBar::slotBounds (int slot) const
+{
+    return { 72.0f + (float) slot * 30.0f, 3.0f, 26.0f, (float) getHeight() - 6.0f };
+}
+
+void SequencerBar::resized()
+{
+    lengthSlider.setBounds (372, 0, 160, getHeight());
+    swingSlider.setBounds (584, 0, juce::jmax (100, getWidth() - 584), getHeight());
+}
+
+void SequencerBar::mouseDown (const juce::MouseEvent& e)
+{
+    for (int slot = 0; slot < OpenGlitchAudioProcessor::numPatterns; ++slot)
+    {
+        if (slotBounds (slot).contains (e.position))
+        {
+            if (e.mods.isShiftDown())
+                processor.copyActivePatternTo (slot); // copy current pattern here, then switch
+            else if (patternAttachment != nullptr)
+                patternAttachment->setValueAsCompleteGesture ((float) slot);
+            return;
+        }
+    }
+}
+
+void SequencerBar::paint (juce::Graphics& g)
+{
+    using namespace glitch::palette;
+
+    g.setColour (textDim);
+    g.setFont (juce::Font (juce::FontOptions (11.5f)).boldened());
+    g.drawText ("PATTERN", 0, 0, 66, getHeight(), juce::Justification::centredLeft);
+    g.drawText ("LENGTH", 318, 0, 54, getHeight(), juce::Justification::centredLeft);
+    g.drawText ("SWING", 538, 0, 46, getHeight(), juce::Justification::centredLeft);
+
+    const auto accent = glitch::effectColour (3);
+    for (int slot = 0; slot < OpenGlitchAudioProcessor::numPatterns; ++slot)
+    {
+        const auto r = slotBounds (slot);
+        const bool isActive = slot == activeSlot;
+        g.setColour (isActive ? accent : cellOff);
+        g.fillRoundedRectangle (r, 4.0f);
+        g.setColour (isActive ? accent.brighter (0.5f) : cellStroke);
+        g.drawRoundedRectangle (r, 4.0f, 1.0f);
+        g.setColour (isActive ? bg : textDim);
+        g.setFont (juce::Font (juce::FontOptions (12.5f)).boldened());
+        g.drawText (juce::String::charToString ((juce::juce_wchar) ('A' + slot)),
+                    r, juce::Justification::centred);
     }
 }
 
@@ -482,12 +608,14 @@ OpenGlitchAudioProcessorEditor::OpenGlitchAudioProcessorEditor (OpenGlitchAudioP
     : juce::AudioProcessorEditor (&p),
       processorRef (p),
       matrix (p.apvts),
+      sequencerBar (p),
       effectPanel (p.apvts),
       masterPanel (p.apvts)
 {
     setLookAndFeel (&lookAndFeel);
 
     addAndMakeVisible (matrix);
+    addAndMakeVisible (sequencerBar);
     addAndMakeVisible (effectPanel);
     addAndMakeVisible (masterPanel);
 
@@ -504,7 +632,7 @@ OpenGlitchAudioProcessorEditor::OpenGlitchAudioProcessorEditor (OpenGlitchAudioP
 
     startTimerHz (30);
     timerCallback(); // seed the LCD before the first tick
-    setSize (940, 600);
+    setSize (940, 620);
 }
 
 OpenGlitchAudioProcessorEditor::~OpenGlitchAudioProcessorEditor()
@@ -519,7 +647,10 @@ void OpenGlitchAudioProcessorEditor::timerCallback()
     const int step = processorRef.getCurrentStep();
     const auto stepText = step >= 0 ? juce::String::formatted ("STEP %02d", step + 1)
                                     : juce::String ("STOPPED");
-    lcdLabel.setText (stepText + "  |  " + juce::String (processorRef.getDisplayBpm(), 1) + " BPM",
+    const auto pattern = juce::String::charToString (
+        (juce::juce_wchar) ('A' + processorRef.getActivePattern()));
+    lcdLabel.setText (pattern + " | " + stepText + " | "
+                          + juce::String (processorRef.getDisplayBpm(), 1) + " BPM",
                       juce::dontSendNotification);
 }
 
@@ -563,8 +694,10 @@ void OpenGlitchAudioProcessorEditor::resized()
     const int matrixRight = masterX - 14;
     matrix.setBounds (margin, headerH + 14, matrixRight - margin, 300);
 
-    effectPanel.setBounds (margin, matrix.getBottom() + 12, matrixRight - margin,
-                           getHeight() - matrix.getBottom() - 12 - margin);
+    sequencerBar.setBounds (margin, matrix.getBottom() + 8, matrixRight - margin, 30);
+
+    effectPanel.setBounds (margin, sequencerBar.getBottom() + 8, matrixRight - margin,
+                           getHeight() - sequencerBar.getBottom() - 8 - margin);
 
     lcdLabel.setBounds (getWidth() - margin - 220, 20, 214, 26);
     clearButton.setBounds (getWidth() - margin - 220 - 78, 20, 64, 26);

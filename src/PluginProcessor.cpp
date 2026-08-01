@@ -68,6 +68,15 @@ juce::AudioProcessorValueTreeState::ParameterLayout OpenGlitchAudioProcessor::cr
     sequencer->addChild (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID ("seq_chaos", 1), "Chaos",
         juce::NormalisableRange<float> (0.0f, 1.0f), 0.0f, percentAttributes()));
+    sequencer->addChild (std::make_unique<juce::AudioParameterChoice> (
+        juce::ParameterID ("pattern_select", 1), "Pattern",
+        juce::StringArray { "A", "B", "C", "D", "E", "F", "G", "H" }, 0));
+    sequencer->addChild (makeInt ("seq_length", "Pattern Length", 1, 16, 16, "steps"));
+    sequencer->addChild (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID ("seq_swing", 1), "Swing",
+        juce::NormalisableRange<float> (0.0f, 0.5f), 0.0f,
+        juce::AudioParameterFloatAttributes().withStringFromValueFunction (
+            [] (float v, int) { return juce::String ((int) std::round (v * 200.0f)) + " %"; })));
     layout.add (std::move (sequencer));
 
     auto effects = std::make_unique<juce::AudioProcessorParameterGroup> ("effects", "Effects", "|");
@@ -114,7 +123,7 @@ OpenGlitchAudioProcessor::OpenGlitchAudioProcessor()
     static const char* const linkedIds[] = {
         "step_1", "step_2", "step_3", "step_4", "step_5", "step_6", "step_7", "step_8",
         "step_9", "step_10", "step_11", "step_12", "step_13", "step_14", "step_15", "step_16",
-        "seq_chaos",
+        "seq_chaos", "seq_length", "seq_swing",
         "fx_tapestop_speed", "fx_mod_freq", "fx_retrigger_rate", "fx_retrigger_pitch",
         "fx_shuffle_range", "fx_crush_rate", "fx_crush_drive", "fx_gate_rate", "fx_gate_duty",
         "fx_delay_div", "fx_delay_feedback", "fx_stretch_speed",
@@ -126,6 +135,113 @@ OpenGlitchAudioProcessor::OpenGlitchAudioProcessor()
         auto* raw = apvts.getRawParameterValue (id);
         jassert (raw != nullptr); // parameter ID must match the Pd receiver name
         paramLinks.push_back ({ hv_stringToHash (id), raw, std::numeric_limits<float>::quiet_NaN() });
+    }
+
+    // Pattern system wiring
+    patternParam = dynamic_cast<juce::AudioParameterChoice*> (apvts.getParameter ("pattern_select"));
+    lengthParam = apvts.getParameter ("seq_length");
+    lengthRaw = apvts.getRawParameterValue ("seq_length");
+    swingRaw = apvts.getRawParameterValue ("seq_swing");
+    jassert (patternParam != nullptr && lengthParam != nullptr);
+
+    for (int i = 0; i < 16; ++i)
+    {
+        const auto id = "step_" + juce::String (i + 1);
+        stepParams[(size_t) i] = apvts.getParameter (id);
+        apvts.addParameterListener (id, this);
+    }
+    apvts.addParameterListener ("seq_length", this);
+    apvts.addParameterListener ("pattern_select", this);
+
+    patternsTree(); // seed all 8 slots (slot A inherits the demo defaults)
+}
+
+// ---------------------------------------------------------------------------
+// Pattern system
+// ---------------------------------------------------------------------------
+juce::ValueTree OpenGlitchAudioProcessor::patternsTree()
+{
+    auto tree = apvts.state.getOrCreateChildWithName ("PATTERNS", nullptr);
+    for (int slot = 0; slot < numPatterns; ++slot)
+    {
+        if (! tree.getChildWithProperty ("index", slot).isValid())
+        {
+            juce::ValueTree pattern ("PATTERN");
+            pattern.setProperty ("index", slot, nullptr);
+            juce::StringArray steps;
+            for (int i = 0; i < 16; ++i)
+                steps.add (slot == 0 ? juce::String ((int) std::lround (
+                                           paramLinks[(size_t) i].value->load()))
+                                     : "0");
+            pattern.setProperty ("steps", steps.joinIntoString (","), nullptr);
+            pattern.setProperty ("length", 16, nullptr);
+            tree.appendChild (pattern, nullptr);
+        }
+    }
+    return tree;
+}
+
+void OpenGlitchAudioProcessor::storePattern (int slot)
+{
+    auto pattern = patternsTree().getChildWithProperty ("index", slot);
+    juce::StringArray steps;
+    for (int i = 0; i < 16; ++i)
+        steps.add (juce::String ((int) std::lround (paramLinks[(size_t) i].value->load())));
+    pattern.setProperty ("steps", steps.joinIntoString (","), nullptr);
+    pattern.setProperty ("length", (int) std::lround (lengthRaw->load()), nullptr);
+}
+
+void OpenGlitchAudioProcessor::loadPattern (int slot)
+{
+    const auto pattern = patternsTree().getChildWithProperty ("index", slot);
+    const auto steps = juce::StringArray::fromTokens (pattern["steps"].toString(), ",", "");
+
+    const juce::ScopedValueSetter<bool> loading (loadingPattern, true);
+    for (int i = 0; i < 16; ++i)
+    {
+        auto* p = stepParams[(size_t) i];
+        p->setValueNotifyingHost (p->convertTo0to1 ((float) steps[i].getIntValue()));
+    }
+    lengthParam->setValueNotifyingHost (
+        lengthParam->convertTo0to1 ((float) (int) pattern.getProperty ("length", 16)));
+}
+
+void OpenGlitchAudioProcessor::copyActivePatternTo (int slot)
+{
+    if (slot < 0 || slot >= numPatterns)
+        return;
+    storePattern (slot);
+    patternParam->setValueNotifyingHost (patternParam->convertTo0to1 ((float) slot));
+}
+
+void OpenGlitchAudioProcessor::parameterChanged (const juce::String& parameterID, float)
+{
+    if (loadingPattern)
+        return;
+    if (parameterID == "pattern_select")
+        patternSelected.store (true);
+    else
+        patternEdited.store (true);
+    triggerAsyncUpdate();
+}
+
+void OpenGlitchAudioProcessor::handleAsyncUpdate()
+{
+    if (patternEdited.exchange (false))
+        storePattern (activeSlot);
+
+    const int midiSlot = pendingMidiPattern.exchange (-1);
+    if (midiSlot >= 0)
+        patternParam->setValueNotifyingHost (patternParam->convertTo0to1 ((float) midiSlot));
+
+    if (patternSelected.exchange (false) || midiSlot >= 0)
+    {
+        const int slot = patternParam->getIndex();
+        if (slot != activeSlot)
+        {
+            activeSlot = slot;
+            loadPattern (slot);
+        }
     }
 }
 
@@ -188,9 +304,17 @@ void OpenGlitchAudioProcessor::releaseResources()
 
 bool OpenGlitchAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
-    // The Heavy context is compiled with a fixed stereo [adc~]/[dac~] pair.
-    return layouts.getMainInputChannelSet() == juce::AudioChannelSet::stereo()
-        && layouts.getMainOutputChannelSet() == juce::AudioChannelSet::stereo();
+    // The Heavy context is fixed stereo internally; the wrapper adapts mono
+    // hosts (duplicate in, average out). Fanning stereo down to mono is the
+    // only combination refused.
+    const auto in = layouts.getMainInputChannelSet();
+    const auto out = layouts.getMainOutputChannelSet();
+    const auto mono = juce::AudioChannelSet::mono();
+    const auto stereo = juce::AudioChannelSet::stereo();
+
+    if ((in != mono && in != stereo) || (out != mono && out != stereo))
+        return false;
+    return ! (in == stereo && out == mono);
 }
 
 void OpenGlitchAudioProcessor::heavySendHook (HeavyContextInterface* context, const char*,
@@ -270,20 +394,24 @@ void OpenGlitchAudioProcessor::pushTransport (int numSamples)
     {
         const double sr = getSampleRate();
         const double ppqEnd = ppq + (double) numSamples * bpm / (60.0 * sr);
-        auto wrap16 = [] (long long g) { return (int) (((g % 16) + 16) % 16); };
+        const auto length = (long long) juce::jlimit (1, 16, (int) std::lround (lengthRaw->load()));
+        const double swingMs = (double) swingRaw->load() * 15000.0 / bpm; // fraction of a 16th
+        auto stepOf = [length] (long long g) { return (int) (((g % length) + length) % length); };
+        auto swingOf = [swingMs] (long long g) { return (g & 1) != 0 ? swingMs : 0.0; };
 
         // Fire the current 16th immediately after any discontinuity
         // (transport start, relocate, loop wrap), then schedule every
-        // boundary inside this block at its exact offset.
+        // boundary inside this block at its exact offset (odd 16ths are
+        // pushed late by the swing amount).
         const auto g0 = (long long) std::floor (ppq * 4.0);
         if (g0 != lastFiredTick)
         {
-            sendTick (wrap16 (g0), 0.0);
+            sendTick (stepOf (g0), swingOf (g0));
             lastFiredTick = g0;
         }
         for (long long g = g0 + 1; (double) g / 4.0 < ppqEnd; ++g)
         {
-            sendTick (wrap16 (g), ((double) g / 4.0 - ppq) * 60000.0 / bpm);
+            sendTick (stepOf (g), ((double) g / 4.0 - ppq) * 60000.0 / bpm + swingOf (g));
             lastFiredTick = g;
         }
     }
@@ -300,11 +428,26 @@ void OpenGlitchAudioProcessor::pushTransport (int numSamples)
 void OpenGlitchAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                                              juce::MidiBuffer& midiMessages)
 {
-    juce::ignoreUnused (midiMessages);
     juce::ScopedNoDenormals noDenormals;
 
     if (heavy == nullptr)
         return;
+
+    // MIDI notes C1..G1 (36..43) select pattern A..H, Glitch-style live
+    // switching. Applied on the message thread via the async updater.
+    for (const auto metadata : midiMessages)
+    {
+        const auto msg = metadata.getMessage();
+        if (msg.isNoteOn())
+        {
+            const int slot = msg.getNoteNumber() - 36;
+            if (slot >= 0 && slot < numPatterns)
+            {
+                pendingMidiPattern.store (slot);
+                triggerAsyncUpdate();
+            }
+        }
+    }
 
     pushChangedParameters();
     pushTransport (buffer.getNumSamples());
@@ -320,16 +463,30 @@ void OpenGlitchAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
     ensureScratch (numSamples);
 
-    for (int ch = 0; ch < 2; ++ch)
-        juce::FloatVectorOperations::copy (scratch[ch], buffer.getReadPointer (ch), numSamples);
+    const int numIn = getTotalNumInputChannels();
+    const int numOut = getTotalNumOutputChannels();
+
+    juce::FloatVectorOperations::copy (scratch[0], buffer.getReadPointer (0), numSamples);
+    juce::FloatVectorOperations::copy (scratch[1], buffer.getReadPointer (numIn > 1 ? 1 : 0),
+                                       numSamples);
 
     float* inputs[2]  = { scratch[0], scratch[1] };
     float* outputs[2] = { scratch[2], scratch[3] };
 
     hv_process (heavy.get(), inputs, outputs, processable);
 
-    for (int ch = 0; ch < 2; ++ch)
-        juce::FloatVectorOperations::copy (buffer.getWritePointer (ch), scratch[2 + ch], processable);
+    if (numOut > 1)
+    {
+        juce::FloatVectorOperations::copy (buffer.getWritePointer (0), scratch[2], processable);
+        juce::FloatVectorOperations::copy (buffer.getWritePointer (1), scratch[3], processable);
+    }
+    else
+    {
+        auto* out = buffer.getWritePointer (0);
+        juce::FloatVectorOperations::copy (out, scratch[2], processable);
+        juce::FloatVectorOperations::add (out, scratch[3], processable);
+        juce::FloatVectorOperations::multiply (out, 0.5f, processable);
+    }
 }
 
 juce::AudioProcessorEditor* OpenGlitchAudioProcessor::createEditor()
@@ -345,7 +502,7 @@ juce::AudioProcessorParameter* OpenGlitchAudioProcessor::getBypassParameter() co
 }
 
 const juce::String OpenGlitchAudioProcessor::getName() const  { return "OpenGlitch"; }
-bool OpenGlitchAudioProcessor::acceptsMidi() const            { return false; }
+bool OpenGlitchAudioProcessor::acceptsMidi() const            { return true; }
 bool OpenGlitchAudioProcessor::producesMidi() const           { return false; }
 bool OpenGlitchAudioProcessor::isMidiEffect() const           { return false; }
 double OpenGlitchAudioProcessor::getTailLengthSeconds() const { return 0.0; }
@@ -365,8 +522,14 @@ void OpenGlitchAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 void OpenGlitchAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
+    {
         if (xml->hasTagName (apvts.state.getType()))
+        {
             apvts.replaceState (juce::ValueTree::fromXml (*xml));
+            patternsTree(); // migrate pre-pattern states
+            activeSlot = patternParam->getIndex();
+        }
+    }
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()

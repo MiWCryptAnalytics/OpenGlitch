@@ -6,11 +6,13 @@
 
 #include "Heavy_OpenGlitch.h"
 
-class OpenGlitchAudioProcessor : public juce::AudioProcessor
+class OpenGlitchAudioProcessor : public juce::AudioProcessor,
+                                 private juce::AudioProcessorValueTreeState::Listener,
+                                 private juce::AsyncUpdater
 {
 public:
     OpenGlitchAudioProcessor();
-    ~OpenGlitchAudioProcessor() override = default;
+    ~OpenGlitchAudioProcessor() override { cancelPendingUpdate(); }
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override;
@@ -44,8 +46,32 @@ public:
     int getCurrentStep() const noexcept { return playheadStep.load (std::memory_order_relaxed); }
     float getDisplayBpm() const noexcept { return displayBpm.load (std::memory_order_relaxed); }
 
+    // Pattern system: 8 slots (A..H) stored in the APVTS state tree. The step
+    // and length parameters always hold the *active* pattern; edits are
+    // recorded into the selected slot, switching loads another slot.
+    static constexpr int numPatterns = 8;
+    int getActivePattern() const noexcept { return activeSlot; }
+    void copyActivePatternTo (int slot); // message thread only (shift-click in the UI)
+
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
+
+    // Pattern storage
+    void parameterChanged (const juce::String& parameterID, float newValue) override;
+    void handleAsyncUpdate() override;
+    juce::ValueTree patternsTree();
+    void storePattern (int slot);
+    void loadPattern (int slot);
+
+    juce::AudioParameterChoice* patternParam = nullptr;
+    std::array<juce::RangedAudioParameter*, 16> stepParams {};
+    juce::RangedAudioParameter* lengthParam = nullptr;
+    std::atomic<float>* lengthRaw = nullptr;
+    std::atomic<float>* swingRaw = nullptr;
+    int activeSlot = 0;
+    bool loadingPattern = false;
+    std::atomic<bool> patternEdited { false }, patternSelected { false };
+    std::atomic<int> pendingMidiPattern { -1 };
     static void heavySendHook (HeavyContextInterface* context, const char* sendName,
                                hv_uint32_t sendHash, const HvMessage* msg);
 

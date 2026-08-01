@@ -66,8 +66,32 @@ private:
 
     std::array<int, 16> steps {};
     std::array<std::unique_ptr<juce::ParameterAttachment>, 16> attachments;
+    std::unique_ptr<juce::ParameterAttachment> lengthAttachment;
+    int patternLength = 16;
     int playheadColumn = -1;
     bool eraseGesture = false;
+};
+
+// Strip below the matrix: pattern slots A..H (click to switch, shift-click to
+// copy the current pattern there), plus pattern length and swing.
+class SequencerBar : public juce::Component
+{
+public:
+    explicit SequencerBar (OpenGlitchAudioProcessor& proc);
+
+    void paint (juce::Graphics&) override;
+    void resized() override;
+    void mouseDown (const juce::MouseEvent&) override;
+
+private:
+    juce::Rectangle<float> slotBounds (int slot) const;
+
+    OpenGlitchAudioProcessor& processor;
+    std::unique_ptr<juce::ParameterAttachment> patternAttachment;
+    int activeSlot = 0;
+    juce::Slider lengthSlider, swingSlider;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> lengthAttachment,
+        swingAttachment;
 };
 
 // Bottom panel: swaps to show the knobs of whichever effect was last touched.
@@ -139,6 +163,7 @@ private:
     OpenGlitchLookAndFeel lookAndFeel;
 
     StepMatrix matrix;
+    SequencerBar sequencerBar;
     EffectPanel effectPanel;
     MasterPanel masterPanel;
     juce::Label lcdLabel;

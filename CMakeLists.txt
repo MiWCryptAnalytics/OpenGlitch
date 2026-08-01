@@ -116,7 +116,8 @@ juce_add_plugin(OpenGlitch
     FORMATS VST3 Standalone
     VST3_CATEGORIES Fx
     IS_SYNTH FALSE
-    NEEDS_MIDI_INPUT FALSE
+    # MIDI notes C1..G1 switch patterns A..H live
+    NEEDS_MIDI_INPUT TRUE
     NEEDS_MIDI_OUTPUT FALSE
     IS_MIDI_EFFECT FALSE
     # Auto-installs to the platform plugin folder (~/.vst3 on Linux) so a

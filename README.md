@@ -13,6 +13,17 @@ Licensed under **GPLv3** (see [LICENSE](LICENSE)).
 
 ## Status
 
+Feature complete for 1.0:
+
+- **8 pattern slots (A–H)** — the strip below the matrix switches patterns;
+  edits always record into the active slot; shift-click a slot to copy the
+  current pattern there. The selector is a DAW-automatable parameter, and
+  **MIDI notes C1–G1 (36–43) switch patterns live**, Glitch-style.
+- **Per-pattern length** (1–16 steps) for odd meters and polymeter loops.
+- **Swing** (0–100%) — sample-accurately scheduled in hosted mode, delayed
+  odd-step firing in the standalone clock.
+- **Mono tracks supported** (mono in is duplicated, mono out averaged).
+
 Phase 4 — full custom GUI. The editor recreates the Glitch matrix: 9 effect
 rows x 16 step columns. Click a cell to assign the effect, click again to
 clear, drag to paint, right-click to erase a column. The playhead lamp and
