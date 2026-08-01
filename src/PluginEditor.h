@@ -145,7 +145,10 @@ private:
         juce::Label label;
         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
     };
-    OutKnob outKnobs[4]; // freq, pan, mix, gain
+    OutKnob outKnobs[5]; // freq, pan, mix, gain, sweep amount
+    juce::ComboBox sweepBox;
+    juce::Label sweepLabel;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> sweepAttachment;
 
     int currentEffect = 3;
 };
@@ -205,10 +208,12 @@ private:
                    const char* name, juce::Colour colour);
 
     std::vector<std::unique_ptr<Fader>> faders;
-    juce::Slider mixSlider;
-    juce::Label mixLabel;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mixAttachment;
-    juce::ComboBox filterTypeBox;
+    juce::Slider mixSlider, volSlider, sweepAmtSlider;
+    juce::Label mixLabel, volLabel, sweepRowLabel;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mixAttachment,
+        volAttachment, sweepAmtAttachment;
+    juce::ComboBox filterTypeBox, sweepShapeBox;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> sweepShapeAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> filterTypeAttachment;
     juce::TextButton bypassButton { "BYPASS" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> bypassAttachment;

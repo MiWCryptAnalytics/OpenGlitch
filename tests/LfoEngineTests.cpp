@@ -69,3 +69,18 @@ TEST_CASE ("extended targets combine within their ranges", "[lfo]")
     REQUIRE (applyMod (lfo1Rate, 123.0f, 1.0) == 123.0f);
     REQUIRE (applyMod (lfo1Depth, 123.0f, 1.0) == 123.0f);
 }
+
+TEST_CASE ("sweep envelope shapes", "[lfo][sweep]")
+{
+    using namespace lfo;
+    REQUIRE_THAT (sweepValue (sweepDown, 0.0), WithinAbs (1.0, 1e-9));
+    REQUIRE_THAT (sweepValue (sweepDown, 1.0), WithinAbs (0.0, 1e-9));
+    REQUIRE_THAT (sweepValue (sweepUp, 0.25), WithinAbs (0.25, 1e-9));
+    REQUIRE_THAT (sweepValue (sweepTri, 0.5), WithinAbs (1.0, 1e-9));
+    REQUIRE_THAT (sweepValue (sweepSine, 0.5), WithinAbs (1.0, 1e-9));
+    REQUIRE_THAT (sweepValue (sweepSine, 0.0), WithinAbs (0.0, 1e-9));
+    REQUIRE (sweepValue (sweepSquare, 0.25) == 1.0);
+    REQUIRE (sweepValue (sweepSquare, 0.75) == 0.0);
+    REQUIRE (sweepValue (sweepOff, 0.5) == 0.0);
+    REQUIRE (sweepValue (sweepDown, 2.0) == 0.0); // clamped past the span
+}

@@ -594,8 +594,18 @@ EffectPanel::EffectPanel (juce::AudioProcessorValueTreeState& state)
             state.getParameter ("fx1_post_mode")))
         outModeBox.addItemList (modeParam->choices, 1);
     addAndMakeVisible (outModeBox);
-    static const char* const outNames[4] = { "FREQ", "PAN", "MIX", "GAIN" };
-    for (int k = 0; k < 4; ++k)
+    sweepLabel.setText ("SWEEP", juce::dontSendNotification);
+    sweepLabel.setFont (juce::Font (juce::FontOptions (11.0f)).boldened());
+    sweepLabel.setColour (juce::Label::textColourId, glitch::palette::textDim);
+    sweepLabel.setJustificationType (juce::Justification::centredLeft);
+    addAndMakeVisible (sweepLabel);
+    if (auto* shapeParam = dynamic_cast<juce::AudioParameterChoice*> (
+            state.getParameter ("fx1_sweep_shape")))
+        sweepBox.addItemList (shapeParam->choices, 1);
+    addAndMakeVisible (sweepBox);
+
+    static const char* const outNames[5] = { "FREQ", "PAN", "MIX", "GAIN", "SWP AMT" };
+    for (int k = 0; k < 5; ++k)
     {
         outKnobs[k].slider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
         outKnobs[k].slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 62, 14);
@@ -660,14 +670,17 @@ void EffectPanel::setEffect (int effectIndex)
     outModeAttachment.reset();
     outModeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
         stateRef, pid ("post_mode"), outModeBox);
-    static const char* const outIds[4] = { "post_freq", "pan", "mix", "gain" };
-    for (int k = 0; k < 4; ++k)
+    static const char* const outIds[5] = { "post_freq", "pan", "mix", "gain", "sweep_amt" };
+    for (int k = 0; k < 5; ++k)
     {
         outKnobs[k].attachment.reset();
         outKnobs[k].slider.setColour (juce::Slider::rotarySliderFillColourId, colour);
         outKnobs[k].attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
             stateRef, pid (outIds[k]), outKnobs[k].slider);
     }
+    sweepAttachment.reset();
+    sweepAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
+        stateRef, pid ("sweep_shape"), sweepBox);
 
     resized();
     repaint();
@@ -693,13 +706,15 @@ void EffectPanel::resized()
 
     const int outTop = getHeight() - 92;
     outCaption.setBounds (14, outTop, 70, 14);
-    outModeBox.setBounds (14, outTop + 20, 84, 22);
-    int ox = 108;
-    for (int k = 0; k < 4; ++k)
+    outModeBox.setBounds (14, outTop + 18, 84, 21);
+    sweepLabel.setBounds (14, outTop + 42, 84, 12);
+    sweepBox.setBounds (14, outTop + 55, 84, 21);
+    int ox = 106;
+    for (int k = 0; k < 5; ++k)
     {
-        outKnobs[k].label.setBounds (ox, outTop, 64, 13);
-        outKnobs[k].slider.setBounds (ox, outTop + 13, 64, getHeight() - outTop - 18);
-        ox += 66;
+        outKnobs[k].label.setBounds (ox, outTop, 52, 13);
+        outKnobs[k].slider.setBounds (ox, outTop + 13, 52, getHeight() - outTop - 18);
+        ox += 54;
     }
 }
 
@@ -995,6 +1010,34 @@ MasterPanel::MasterPanel (juce::AudioProcessorValueTreeState& state)
                         glitch::palette::textDim.interpolatedWith (glitch::palette::lcd, 0.45f));
     addAndMakeVisible (mixLabel);
 
+    volSlider.setSliderStyle (juce::Slider::LinearHorizontal);
+    volSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 44, 15);
+    volSlider.setColour (juce::Slider::rotarySliderFillColourId, glitch::palette::text);
+    addAndMakeVisible (volSlider);
+    volAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        state, "master_volume", volSlider);
+    volLabel.setText ("VOL", juce::dontSendNotification);
+    volLabel.setFont (juce::Font (juce::FontOptions (11.5f)).boldened());
+    volLabel.setColour (juce::Label::textColourId, glitch::palette::textDim);
+    addAndMakeVisible (volLabel);
+
+    if (auto* shapeParam = dynamic_cast<juce::AudioParameterChoice*> (
+            state.getParameter ("master_sweep_shape")))
+        sweepShapeBox.addItemList (shapeParam->choices, 1);
+    addAndMakeVisible (sweepShapeBox);
+    sweepShapeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
+        state, "master_sweep_shape", sweepShapeBox);
+    sweepAmtSlider.setSliderStyle (juce::Slider::LinearHorizontal);
+    sweepAmtSlider.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+    sweepAmtSlider.setColour (juce::Slider::rotarySliderFillColourId, juce::Colour (0xff4fc3f7));
+    addAndMakeVisible (sweepAmtSlider);
+    sweepAmtAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        state, "master_sweep_amt", sweepAmtSlider);
+    sweepRowLabel.setText ("SWP", juce::dontSendNotification);
+    sweepRowLabel.setFont (juce::Font (juce::FontOptions (11.5f)).boldened());
+    sweepRowLabel.setColour (juce::Label::textColourId, glitch::palette::textDim);
+    addAndMakeVisible (sweepRowLabel);
+
     if (auto* typeParam = dynamic_cast<juce::AudioParameterChoice*> (
             state.getParameter ("master_filter_type")))
     {
@@ -1037,9 +1080,9 @@ void MasterPanel::resized()
     const int top = 26;
     const int bypassH = 30;
     const int comboH = 22;
-    const int mixH = 24;
+    const int rowStep = 25;
     const int faderW = getWidth() / 4;
-    const int bottomZone = bypassH + comboH + mixH + 26;
+    const int bottomZone = bypassH + comboH + rowStep * 3 + 24;
     const int rowH = (getHeight() - top - bottomZone) / 2;
     for (size_t i = 0; i < faders.size(); ++i)
     {
@@ -1048,10 +1091,18 @@ void MasterPanel::resized()
         faders[i]->nameLabel.setBounds (x, y, faderW, 14);
         faders[i]->slider.setBounds (x, y + 16, faderW, rowH - 20);
     }
-    const int mixY = getHeight() - bottomZone + 2;
-    mixLabel.setBounds (8, mixY, 30, mixH);
-    mixSlider.setBounds (38, mixY, getWidth() - 44, mixH);
-    filterTypeBox.setBounds (10, mixY + mixH + 4, getWidth() - 20, comboH);
+    int rowY = getHeight() - bottomZone + 2;
+    mixLabel.setBounds (8, rowY, 30, 22);
+    mixSlider.setBounds (38, rowY, getWidth() - 44, 22);
+    rowY += rowStep;
+    volLabel.setBounds (8, rowY, 30, 22);
+    volSlider.setBounds (38, rowY, getWidth() - 44, 22);
+    rowY += rowStep;
+    sweepRowLabel.setBounds (8, rowY, 30, 22);
+    sweepShapeBox.setBounds (38, rowY, 64, 22);
+    sweepAmtSlider.setBounds (106, rowY, getWidth() - 112, 22);
+    rowY += rowStep;
+    filterTypeBox.setBounds (10, rowY, getWidth() - 20, comboH);
     bypassButton.setBounds (10, getHeight() - bypassH - 6, getWidth() - 20, bypassH);
 }
 

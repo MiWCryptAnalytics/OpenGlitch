@@ -144,6 +144,17 @@ private:
     std::atomic<float>* seedRaw = nullptr;
     int dicePressCount = 0;
 
+    // Filter sweep envelopes: shape+amount per effect and for the master
+    // filter, evaluated against the phase within the current step/span.
+    std::atomic<float>* sweepRaw[9][2] = {};  // [effect][shape, amount]
+    std::atomic<float>* masterSweepRaw[2] = {};
+    std::atomic<float>* masterVolumeRaw = nullptr;
+    long long sweepSpanStartG = 0;
+    int sweepSpanLength = 1;
+    double currentSixteenth = 0.0; // continuous 16th position, set per block
+    float postSweepFactor = 1.0f, masterSweepFactor = 1.0f;
+    float lastAppliedVolume = 1.0f;
+
     juce::AudioParameterBool* bypassParam = nullptr;
 
     // Heavy's SIMD loads/stores require 16/32-byte aligned channel buffers.

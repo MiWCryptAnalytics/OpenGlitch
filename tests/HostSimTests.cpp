@@ -610,3 +610,45 @@ TEST_CASE ("host: LFO on crush rate audibly animates the crusher", "[host][lfo]"
     REQUIRE (allFinite (swept));
     REQUIRE (maxDiff (swept, still) > 0.05f);
 }
+
+TEST_CASE ("host: filter sweeps and master volume are audible", "[host][sweep]")
+{
+    auto runWith = [] (std::initializer_list<std::pair<const char*, float>> params)
+    {
+        Harness h;
+        h.playhead.playing = true;
+        h.setAllSteps (0.0f);
+        for (const auto& [id, v] : params)
+            h.setParam (id, v);
+        h.run (0.3);
+        return h.run (1.5);
+    };
+
+    // Master sweep: cutoff dives -3 octaves at each step start, recovers.
+    auto plain = runWith ({});
+    auto swept = runWith ({ { "master_sweep_shape", 1.0f }, { "master_sweep_amt", -3.0f } });
+    REQUIRE (allFinite (swept));
+    REQUIRE (maxDiff (swept, plain) > 0.05f);
+
+    // Per-effect sweep on the crusher's post filter.
+    auto crusherStill = runWith ({ { "step_1", 6.0f }, { "step_2", 10.0f }, { "step_3", 10.0f },
+                                   { "step_4", 10.0f }, { "fx6_post_mode", 1.0f },
+                                   { "fx6_post_freq", 8000.0f } });
+    auto crusherSwept = runWith ({ { "step_1", 6.0f }, { "step_2", 10.0f }, { "step_3", 10.0f },
+                                   { "step_4", 10.0f }, { "fx6_post_mode", 1.0f },
+                                   { "fx6_post_freq", 8000.0f }, { "fx6_sweep_shape", 1.0f },
+                                   { "fx6_sweep_amt", -3.0f } });
+    REQUIRE (maxDiff (crusherSwept, crusherStill) > 0.02f);
+
+    // Master volume halves the output.
+    std::vector<float> in;
+    Harness h;
+    h.playhead.playing = true;
+    h.setAllSteps (0.0f);
+    h.setParam ("master_volume", 0.5f);
+    h.run (0.3);
+    auto halved = h.run (1.0, &in);
+    const float ratio = rms (halved) / rms (in);
+    REQUIRE (ratio > 0.4f);
+    REQUIRE (ratio < 0.6f);
+}

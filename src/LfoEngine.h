@@ -62,6 +62,24 @@ inline float applyMod (int target, float base, double c)
     }
 }
 
+// Per-step filter sweep envelopes (the original's waveform-button row):
+// unipolar 0..1 over the step/span phase, scaled into octaves by the caller.
+enum SweepShape { sweepOff = 0, sweepDown, sweepUp, sweepTri, sweepSine, sweepSquare };
+
+inline double sweepValue (int shape, double phase)
+{
+    const double p = std::clamp (phase, 0.0, 1.0);
+    switch (shape)
+    {
+        case sweepDown:   return 1.0 - p;
+        case sweepUp:     return p;
+        case sweepTri:    return 1.0 - std::abs (2.0 * p - 1.0);
+        case sweepSine:   return 0.5 - 0.5 * std::cos (p * 2.0 * 3.141592653589793);
+        case sweepSquare: return p < 0.5 ? 1.0 : 0.0;
+        default:          return 0.0;
+    }
+}
+
 struct State
 {
     double phase = 0.0;

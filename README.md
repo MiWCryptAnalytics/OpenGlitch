@@ -37,6 +37,11 @@ Feature complete for 1.0:
   the master faders (bandpass is a hip~/lop~ series pair).
 - **Tempo-synced ring modulator** — a SYNC selector on the Modulator panel
   locks its frequency to divisions from 1/16 to a full bar.
+- **Filter sweep envelopes** — the original's waveform-button row: a
+  shape (Down/Up/Tri/Sine/Square) that sweeps the filter cutoff across
+  each step in octaves, per effect and on the master filter. Ours sweeps
+  across a whole span when steps are tied.
+- **Master output Volume** (ramped, click-free).
 - **Per-effect output strips** — every effect has its own filter
   (Off/LP/HP/BP + freq), pan, mix and gain, like the original's column
   strips. Implemented as one shared post stage that snaps to whichever

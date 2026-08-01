@@ -119,6 +119,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout OpenGlitchAudioProcessor::cr
             juce::NormalisableRange<float> (0.0f, 1.0f), 1.0f, percentAttributes()));
         post->addChild (makeFloat (pid ("gain").toRawUTF8(), pname ("Gain").toRawUTF8(),
                                    0.0f, 2.0f, 1.0f, 0.0f, "x"));
+        post->addChild (std::make_unique<juce::AudioParameterChoice> (
+            juce::ParameterID (pid ("sweep_shape"), 1), pname ("Sweep"),
+            juce::StringArray { "Off", "Down", "Up", "Tri", "Sine", "Square" }, 0));
+        post->addChild (makeFloat (pid ("sweep_amt").toRawUTF8(), pname ("Sweep Amount").toRawUTF8(),
+                                   -3.0f, 3.0f, 2.0f, 0.0f, "oct"));
     }
     layout.add (std::move (post));
 
@@ -159,6 +164,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout OpenGlitchAudioProcessor::cr
     master->addChild (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID ("master_mix", 1), "Mix",
         juce::NormalisableRange<float> (0.0f, 1.0f), 1.0f, percentAttributes()));
+    master->addChild (std::make_unique<juce::AudioParameterChoice> (
+        juce::ParameterID ("master_sweep_shape", 1), "Master Sweep",
+        juce::StringArray { "Off", "Down", "Up", "Tri", "Sine", "Square" }, 0));
+    master->addChild (makeFloat ("master_sweep_amt", "Master Sweep Amount", -3.0f, 3.0f, 2.0f, 0.0f, "oct"));
+    master->addChild (makeFloat ("master_volume", "Volume", 0.0f, 2.0f, 1.0f, 1.0f, "x"));
     master->addChild (std::make_unique<juce::AudioParameterBool> (
         juce::ParameterID ("bypass", 1), "Bypass", false));
     layout.add (std::move (master));
@@ -258,6 +268,14 @@ OpenGlitchAudioProcessor::OpenGlitchAudioProcessor()
     for (int k = 0; k < 5; ++k)
         postHash[k] = hv_stringToHash (postReceivers[k]);
     seedRaw = apvts.getRawParameterValue ("seq_seed");
+    for (int n = 0; n < 9; ++n)
+    {
+        sweepRaw[n][0] = apvts.getRawParameterValue ("fx" + juce::String (n + 1) + "_sweep_shape");
+        sweepRaw[n][1] = apvts.getRawParameterValue ("fx" + juce::String (n + 1) + "_sweep_amt");
+    }
+    masterSweepRaw[0] = apvts.getRawParameterValue ("master_sweep_shape");
+    masterSweepRaw[1] = apvts.getRawParameterValue ("master_sweep_amt");
+    masterVolumeRaw = apvts.getRawParameterValue ("master_volume");
 
     // Pattern system wiring
     patternParam = dynamic_cast<juce::AudioParameterChoice*> (apvts.getParameter ("pattern_select"));
@@ -600,6 +618,29 @@ void OpenGlitchAudioProcessor::updateLfos (int numSamples)
     if (target1 > lfo::off && target1 < lfo::lfo1Rate)
         modContrib[target1] += (float) v1;
 
+    // Filter sweep envelopes: phase within the current step/span.
+    {
+        const double g16 = hosted ? ppq * 4.0 : standalonePpq * 4.0;
+        const bool sweeping = playing || ! hosted;
+        const double phase = sweepSpanLength > 0
+            ? (g16 - (double) sweepSpanStartG) / (double) sweepSpanLength
+            : 0.0;
+        auto factorFor = [&] (std::atomic<float>* shapeRaw, std::atomic<float>* amtRaw)
+        {
+            if (! sweeping)
+                return 1.0f;
+            const int shape = (int) std::lround (shapeRaw->load (std::memory_order_relaxed));
+            if (shape == lfo::sweepOff)
+                return 1.0f;
+            const double amount = (double) amtRaw->load (std::memory_order_relaxed);
+            return (float) std::exp2 (amount * lfo::sweepValue (shape, phase));
+        };
+        masterSweepFactor = factorFor (masterSweepRaw[0], masterSweepRaw[1]);
+        postSweepFactor = activePostEffect >= 1
+            ? factorFor (sweepRaw[activePostEffect - 1][0], sweepRaw[activePostEffect - 1][1])
+            : 1.0f;
+    }
+
     lfoPhaseA[0].store ((float) lfoStates[0].phase, std::memory_order_relaxed);
     lfoPhaseA[1].store ((float) lfoStates[1].phase, std::memory_order_relaxed);
     lfoValueA[0].store ((float) v1, std::memory_order_relaxed);
@@ -613,7 +654,9 @@ void OpenGlitchAudioProcessor::pushPostParameters()
         return;
     for (int k = 0; k < 5; ++k)
     {
-        const float v = postRaw[activePostEffect - 1][k]->load (std::memory_order_relaxed);
+        float v = postRaw[activePostEffect - 1][k]->load (std::memory_order_relaxed);
+        if (k == 1) // filter freq rides the sweep envelope
+            v = juce::jlimit (100.0f, 20000.0f, v * postSweepFactor);
         if (! juce::exactlyEqual (v, lastSentPost[k]))
             if (hv_sendFloatToReceiver (heavy.get(), postHash[k], v))
                 lastSentPost[k] = v;
@@ -638,6 +681,9 @@ void OpenGlitchAudioProcessor::pushChangedParameters()
                 v = 1000.0f / (stepMs * syncSteps[sync]);
             }
         }
+
+        if (link.modTarget == lfo::filterFreq)
+            v *= masterSweepFactor; // sweep first; applyMod clamps to range
 
         if (link.modTarget != lfo::off)
             v = lfo::applyMod (link.modTarget, v, (double) modContrib[link.modTarget]);
@@ -749,11 +795,22 @@ void OpenGlitchAudioProcessor::pushTransport (int numSamples)
             const int v = (int) std::lround (paramLinks[(size_t) step].value->load());
             if (v != 10)
             {
+                sweepSpanStartG = g;
+                sweepSpanLength = spanAt (step);
                 static const float neutral[5] = { 0.0f, 20000.0f, 0.0f, 1.0f, 1.0f };
                 const int effect = (v >= 1 && v <= 9) ? v : 0;
                 for (int k = 0; k < 5; ++k)
                 {
-                    const float pv = effect > 0 ? postRaw[effect - 1][k]->load() : neutral[k];
+                    float pv = effect > 0 ? postRaw[effect - 1][k]->load() : neutral[k];
+                    if (k == 1 && effect > 0)
+                    {
+                        // freq leaves the gate already at the sweep's start value
+                        const int shape = (int) std::lround (sweepRaw[effect - 1][0]->load());
+                        if (shape != lfo::sweepOff)
+                            pv = juce::jlimit (100.0f, 20000.0f,
+                                pv * (float) std::exp2 ((double) sweepRaw[effect - 1][1]->load()
+                                                        * lfo::sweepValue (shape, 0.0)));
+                    }
                     hv_sendMessageToReceiverV (heavy.get(), postHash[k], delayMs, "f", (double) pv);
                     lastSentPost[k] = pv;
                 }
@@ -847,6 +904,14 @@ void OpenGlitchAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         juce::FloatVectorOperations::copy (out, scratch[2], processable);
         juce::FloatVectorOperations::add (out, scratch[3], processable);
         juce::FloatVectorOperations::multiply (out, 0.5f, processable);
+    }
+
+    // Master output volume (JUCE-side, ramped to avoid zipper noise).
+    {
+        const float target = masterVolumeRaw->load (std::memory_order_relaxed);
+        for (int ch = 0; ch < numOut && ch < buffer.getNumChannels(); ++ch)
+            buffer.applyGainRamp (ch, 0, processable, lastAppliedVolume, target);
+        lastAppliedVolume = target;
     }
 
     // Diagnostic wet meter: how strongly the engine altered channel 0.
